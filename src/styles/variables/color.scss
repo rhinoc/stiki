@@ -1,0 +1,79 @@
+// https://oklch.com/
+:root {
+  --color-font-1: #000;
+  --color-font-2: #222;
+  --color-font-3: #22222270;
+  --color-font-4: #22222230;
+
+  --color-font-invert-1: #fff;
+  --color-font-invert-2: #dcdcdc;
+  --color-font-invert-3: #dcdcdc70;
+  --color-font-invert-4: #dcdcdc30;
+
+  --color-close: #fe6057;
+  --color-minimize: #ffbe2d;
+  --color-maximize: #28ca41;
+
+  /* rgb(255, 255, 255) */
+  --white: 255, 255, 255;
+  /* rgb(0, 0, 0) */
+  --black: 0, 0, 0;
+  /* rgb(34, 197, 94) */
+  --green: 34, 197, 94;
+  /* rgb(255, 190, 45) */
+  --yellow: 255, 190, 45;
+  /* rgb(106, 0, 245) */
+  --purple: 106, 0, 245;
+  /* rgb(255, 92, 51) */
+  --red: 255, 92, 51;
+  /* rgb(0, 215, 255) */
+  --blue: 0, 215, 255;
+  /* rgb(0, 102, 255) */
+  --blue-dark: 0, 76, 184;
+  /* rgb(0, 215, 176) */
+  --mint: 0, 215, 176;
+
+  --color-spice-l: var(--color-spice-l--light);
+  --color-spice-c: var(--color-spice-c--light);
+  --color-spice-h: var(--color-spice-h--light);
+  --color-spice-lch: var(--color-spice-l) var(--color-spice-c) var(--color-spice-h);
+  --color-spice: oklch(var(--color-spice-lch));
+
+  /* with alpha */
+  --color-spice-alpha-1: oklch(var(--color-spice-lch) / .8);
+  --color-spice-alpha-2: oklch(var(--color-spice-lch) / .6);
+  --color-spice-alpha-3: oklch(var(--color-spice-lch) / .2);
+  --color-spice-alpha-4: oklch(var(--color-spice-lch) / .1);
+
+  --color-spice-triad1-h: calc(var(--color-spice-h) + 120);
+  --color-spice-triad1-lch: var(--color-spice-l) var(--color-spice-c) var(--color-spice-triad1-h);
+  --color-spice-triad1: oklch(var(--color-spice-triad1-lch));
+
+  --color-spice-triad2-h: calc(var(--color-spice-h) + 60);
+  --color-spice-triad2-lch: var(--color-spice-l) var(--color-spice-c) var(--color-spice-triad2-h);
+  --color-spice-triad2: oklch(var(--color-spice-triad2-lch));
+
+  --color-spice-invert-h: mod(calc(var(--color-spice-h) + 180), 360);
+  --color-spice-invert-lch: var(--color-spice-l) var(--color-spice-c) var(--color-spice-invert-h);
+  --color-spice-invert: oklch(var(--color-spice-invert-lch));
+
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-spice-l: var(--color-spice-l--dark);
+    --color-spice-c: var(--color-spice-c--dark);
+    --color-spice-h: var(--color-spice-h--dark);
+    --color-font-1: #fff;
+    --color-font-2: #efefef;
+    --color-font-3: #dcdcdc70;
+    --color-font-4: #dcdcdc30;
+
+    --color-font-invert-1: #000;
+    --color-font-invert-2: #222;
+    --color-font-invert-3: #22222270;
+    --color-font-invert-4: #22222230;
+
+    --brightness-active: 1.2;
+  }
+}

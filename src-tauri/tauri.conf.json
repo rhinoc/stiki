@@ -1,0 +1,58 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "stiki",
+  "version": "../package.json",
+  "identifier": "com.rhinoc.stiki",
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../build"
+  },
+  "app": {
+    "windows": [],
+    "macOSPrivateApi": true,
+    "security": {
+      "csp": null
+    },
+    "trayIcon": {
+      "iconAsTemplate": true,
+      "iconPath": "icons/tray.png"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "createUpdaterArtifacts": true,
+    "macOS": {
+      "dmg": {
+        "background": "res/dmg-background.png",
+        "windowSize": {
+          "width": 661,
+          "height": 401
+        },
+        "appPosition": {
+          "x": 180,
+          "y": 195
+        },
+        "applicationFolderPosition": {
+          "x": 480,
+          "y": 195
+        }
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI0MkIxNDE2QTBCMERCRjYKUldUMjI3Q2dGaFFySklvNlowQmdDaFpVSGkxZDFhY2NiakZvSjdXUGppZlZVZGJiT3I4QU9vYncK",
+      "endpoints": ["https://github.com/rhinoc/stiki/releases/latest/download/latest.json"]
+    },
+    "deep-link": {
+      "mobile": [],
+      "desktop": {
+        "schemes": ["stiki"]
+      }
+    }
+  }
+}

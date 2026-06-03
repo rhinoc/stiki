@@ -1,0 +1,65 @@
+.hljs-code,
+.hljs-comment,
+.hljs-quote {
+  color: var(--color-font-3);
+  font-style: italic;
+}
+
+.hljs-keyword {
+  color: var(--color-spice);
+}
+
+.hljs-symbol,
+.hljs-selector-class,
+.hljs-selector-id,
+.hljs-selector-tag,
+.hljs-template-tag,
+.hljs-selector-attr,
+.hljs-selector-pseudo,
+.hljs-meta .hljs-keyword,
+.hljs-name,
+.hljs-built_in,
+.hljs-type,
+.hljs-bullet {
+  color: var(--color-spice-triad2);
+}
+
+.hljs-attribute,
+.hljs-attr,
+.hljs-number,
+.hljs-regexp,
+.hljs-string,
+.hljs-literal,
+.hljs-template-variable {
+  color: var(--color-spice-triad1);
+}
+
+.hljs-addition {
+  background: rgba(var(--green), 0.25);
+}
+
+.hljs-deletion {
+  background: rgba(var(--red), 0.25);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: bold;
+}
+
+.hljs-variable,
+.hljs-operator,
+.hljs-punctuation,
+.hljs-title,
+.hljs-property,
+.hljs-title.class_.inherited__,
+.hljs-title.class_,
+.hljs-params,
+.hljs-bullet,
+.hljs-formula,
+.hljs-tag {
+  /* purposely ignored */
+}
