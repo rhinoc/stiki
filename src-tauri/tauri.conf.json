@@ -26,6 +26,11 @@
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
     "createUpdaterArtifacts": true,
     "macOS": {
+      "files": {
+        "MacOS/stiki-native-transcriber": "native/transcriber/bundle/stiki-native-transcriber",
+        "Resources/transcriber/runtime": "native/transcriber/bundle/runtime",
+        "Resources/transcriber/scripts/sensevoice_worker.py": "native/transcriber/scripts/sensevoice_worker.py"
+      },
       "dmg": {
         "background": "res/dmg-background.png",
         "windowSize": {

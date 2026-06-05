@@ -9,3 +9,7 @@ node_modules
 !.env.example
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+src-tauri/native/transcriber/.build
+src-tauri/native/transcriber/bundle
+src-tauri/native/transcriber/.venv
+src-tauri/native/transcriber/scripts/__pycache__

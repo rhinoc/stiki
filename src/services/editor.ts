@@ -133,6 +133,20 @@ export class EditorService extends BaseService<State, NonStateEvents> {
     });
   }
 
+  appendMarkdown(markdown: string) {
+    const currentMarkdown = this.getContent("markdown").trimEnd();
+    const nextMarkdown = currentMarkdown ? `${currentMarkdown}\n\n${markdown}` : markdown;
+
+    this._editor.commands.setContent(nextMarkdown, {
+      emitUpdate: false,
+    });
+    this._editor.commands.focus("end");
+    this.setStates({
+      json: this._editor.getJSON(),
+      anchor: this._editor.state.selection.anchor,
+    });
+  }
+
   resetHistory() {
     // https://github.com/ueberdosis/tiptap/issues/491
     (this._editor.state as any).history$.prevRanges = null;

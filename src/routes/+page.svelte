@@ -27,6 +27,7 @@ import { MarkdownFileService } from "../services/markdown-file";
 import { SaveService, StateKey } from "../services/save";
 import { TabService } from "../services/tab";
 import { ThemeService } from "../services/theme";
+import { TranscriptService, type TranscriptSegment } from "../services/transcript";
 import { restoreState } from "../services/utils/restore";
 import { WindowService } from "../services/window";
 import { captureGlobalError, logEnvInfo, Logger } from "../utils/common/logger";
@@ -62,6 +63,11 @@ const markdownFileService = new MarkdownFileService({
 });
 
 const tabService = new TabService();
+
+const transcriptService = new TranscriptService();
+disposeFns.push(() => {
+  transcriptService.dispose();
+});
 // #endregion service
 
 // #region global listener
@@ -121,6 +127,7 @@ onMount(async () => {
     tabService,
     windowService,
     themeService,
+    transcriptService,
     stateValues: saveService.getAll(),
   });
   await windowService.init(); // in case restored data is invalid, init later to overwrite
@@ -169,6 +176,21 @@ onMount(async () => {
     }),
   );
 
+  disposeFns.push(
+    transcriptService.on("all", ([state, keys]) => {
+      if (
+        keys.includes("selectedSource") ||
+        keys.includes("locale") ||
+        keys.includes("backend") ||
+        keys.includes("senseVoiceModel") ||
+        keys.includes("includeTimestamp") ||
+        keys.includes("includeSpeaker")
+      ) {
+        saveService.set(StateKey.TranscriptSettingsState, transcriptService.getSettingsState());
+      }
+    }),
+  );
+
   const disposeTab = tabService.on("all", ([state, keys]) => {
     saveService.set(StateKey.TabState, state);
     editorService.restoreFromState(tabService.currentEditorState, {
@@ -186,6 +208,11 @@ onMount(async () => {
     }
   });
   disposeFns.push(disposeTab);
+
+  const disposeTranscript = transcriptService.on("segment", (segment: TranscriptSegment) => {
+    editorService.appendMarkdown(`> ${segment.text}`);
+  });
+  disposeFns.push(disposeTranscript);
   // #endregion init service listeners
 
   hasPrepared = true;
@@ -223,7 +250,7 @@ const handleTabClick = () => {
         <TabSwither {tabService} onClickItem={handleTabClick} />
       </div>
       <div class="right">
-        <FooterToolbar {editorService} {markdownFileService} {tabService} {themeService} />
+        <FooterToolbar {editorService} {markdownFileService} {tabService} {themeService} {transcriptService} />
       </div>
     </footer>
   {/if}

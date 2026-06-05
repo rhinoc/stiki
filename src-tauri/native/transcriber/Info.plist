@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.rhinoc.stiki.transcriber</string>
+	<key>CFBundleName</key>
+	<string>Stiki Native Transcriber</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Stiki needs system audio access to include computer audio in transcript capture.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Stiki needs microphone access to append live transcript text to your current note.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Stiki needs speech recognition access to turn captured audio into transcript text.</string>
+</dict>
+</plist>

@@ -44,11 +44,13 @@
 - 🔗 **Real files when you want them** — Link a tab to a `.md` or `.markdown` file and let Stiki autosave changes back to disk.
 - 🗂️ **A few notes, one small window** — Switch between labeled tabs without turning your desktop into a pile of note windows.
 - 📌 **Always within reach** — Pin it above other windows, fold it down, hide it to the tray, or bring it back with `stiki://toggle-window`.
+- 🎙️ **Live transcript notes** — Append microphone or system-audio transcript snippets into the current note with Apple Speech by default and optional local SenseVoice models.
 
 ## Requirements
 
 - **macOS** for the packaged desktop app and release DMGs.
 - **Network access** for release downloads and update checks.
+- **Microphone, speech recognition, and system audio permissions** are requested only when transcript capture is used.
 
 ## Install
 
@@ -98,6 +100,42 @@ The tray menu can show or hide the window, toggle launch at startup, check for u
 
 Use the theme control in the header toolbar to adjust the accent color. Stiki stores separate light and dark accent values and follows the system color scheme.
 
+### Transcript capture
+
+Use the microphone button in the footer toolbar to start or stop transcript capture. The transcript source can be microphone audio, system audio, or both. When both sources are enabled, Stiki suppresses close duplicate transcript snippets from different sources so system audio picked up by the microphone is less likely to be written twice.
+
+The transcript backend defaults to **Apple Speech**. Apple Speech uses macOS speech recognition and does not require a local model folder.
+
+The footer toolbar menu includes transcript settings for source, language, backend, local SenseVoice model, and output format. Transcript format can include or omit a 24-hour timestamp and speaker prefix. When speaker is enabled, snippets are written with `Mic:` or `System:`.
+
+#### Local SenseVoice models
+
+SenseVoice models are user-provided. Stiki release builds include the local inference runtime, but model files are not bundled or committed to this repository. Users can keep large model directories wherever they prefer.
+
+To add a local SenseVoice model:
+
+1. Open the footer toolbar menu.
+2. Choose **Backend: SenseVoice**.
+3. Choose **SenseVoice Model → Open Models Folder...**.
+4. Put a model directory in that folder, or create a symbolic link to a model directory stored elsewhere.
+5. Choose **SenseVoice Model → Refresh Models**.
+6. Select the model from the **SenseVoice Model** submenu.
+
+The models folder is:
+
+```text
+~/Library/Application Support/com.rhinoc.stiki/sensevoice-models/
+```
+
+Each direct child directory or symbolic link is treated as one selectable model. For example:
+
+```bash
+ln -s ~/.cache/modelscope/hub/models/iic/SenseVoiceSmall \
+  ~/Library/Application\ Support/com.rhinoc.stiki/sensevoice-models/SenseVoiceSmall
+```
+
+Different model sizes, checkpoints, or parameter variants can be exposed by adding more directories or links with different names. Stiki lists direct child directories and symlinks, but the SenseVoice/FunASR loader still requires a valid model layout at runtime.
+
 ### Deep links
 
 Use this URL to toggle the main window from launchers or scripts:
@@ -111,6 +149,7 @@ stiki://toggle-window
 | Location | What it stores | Notes |
 | --- | --- | --- |
 | `~/Library/Application Support/com.rhinoc.stiki/` | App-managed settings and note state | Includes the Tauri store data used by Stiki. |
+| `~/Library/Application Support/com.rhinoc.stiki/sensevoice-models/` | User-provided SenseVoice model directories or symlinks | Model files are not committed to this repository. |
 | User-selected `.md` / `.markdown` files | Linked note content | Stiki writes linked tabs back to these files. |
 
 ## Contributing

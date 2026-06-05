@@ -44,6 +44,21 @@ this file is the top-level attribution index for public releases.
   generation.
 - [GitHub Actions](https://github.com/features/actions) for release automation.
 
+## Transcript and Speech
+
+- Apple Speech framework for the default macOS speech-recognition backend.
+- Apple AVFoundation and ScreenCaptureKit frameworks for microphone and system
+  audio capture on macOS.
+- [FunASR](https://github.com/modelscope/FunASR) for the optional local
+  SenseVoice inference worker.
+- [SenseVoice](https://github.com/FunAudioLLM/SenseVoice) / ModelScope-hosted
+  model files for user-provided local transcript models.
+
+SenseVoice model files are not committed to this repository. Users can place
+model directories or symbolic links in Stiki's local `sensevoice-models/`
+folder; those model files remain subject to their own upstream license and
+redistribution terms.
+
 ## Project Assets
 
 Bundled app icons, tray icon, and DMG background assets live under

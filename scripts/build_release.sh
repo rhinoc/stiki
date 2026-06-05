@@ -20,6 +20,7 @@ build_arch() {
   local target="$1"
   local arch="$2"
 
+  "$ROOT/scripts/prepare-native-transcriber-runtime.sh" "$arch"
   bun run tauri build --target "$target" --bundles app --ci
 
   local app="$ROOT/src-tauri/target/$target/release/bundle/macos/stiki.app"
@@ -47,43 +48,30 @@ build_arch() {
   cp "$updater_sig_src" "$ROOT/dist/$updater_name.sig"
 }
 
-build_arch aarch64-apple-darwin aarch64
-build_arch x86_64-apple-darwin x64
+default_arch="aarch64"
+if [[ "$(uname -m)" == "x86_64" ]]; then
+  default_arch="x64"
+fi
+release_arches="${STIKI_RELEASE_ARCHS:-$default_arch}"
+for arch in $release_arches; do
+  case "$arch" in
+    aarch64)
+      build_arch aarch64-apple-darwin aarch64
+      ;;
+    x64)
+      build_arch x86_64-apple-darwin x64
+      ;;
+    *)
+      echo "error: unsupported release arch: $arch" >&2
+      exit 1
+      ;;
+  esac
+done
 
-VERSION="$VERSION" \
-RELEASE_URL="$RELEASE_URL" \
-node <<'NODE'
-const fs = require('node:fs');
+if [[ -f "$ROOT/dist/stiki-${VERSION}-aarch64.app.tar.gz.sig" && -f "$ROOT/dist/stiki-${VERSION}-x64.app.tar.gz.sig" ]]; then
+  "$ROOT/scripts/write_latest_json.sh"
+fi
 
-const version = process.env.VERSION;
-const releaseUrl = process.env.RELEASE_URL;
-
-const artifacts = {
-  'darwin-aarch64': 'aarch64',
-  'darwin-aarch64-app': 'aarch64',
-  'darwin-x86_64': 'x64',
-  'darwin-x86_64-app': 'x64'
-};
-
-const platforms = {};
-for (const [platform, arch] of Object.entries(artifacts)) {
-  const updaterName = `stiki-${version}-${arch}.app.tar.gz`;
-  const signature = fs.readFileSync(`dist/${updaterName}.sig`, 'utf8').trim();
-  platforms[platform] = {
-    signature,
-    url: `${releaseUrl}/${updaterName}`
-  };
-}
-
-const latest = {
-  version,
-  notes: 'Open the DMG and drag stiki.app to Applications.',
-  pub_date: new Date().toISOString(),
-  platforms
-};
-
-fs.writeFileSync('dist/latest.json', `${JSON.stringify(latest, null, 2)}\n`);
-NODE
-
-echo "Built dist/stiki-${VERSION}-aarch64.dmg"
-echo "Built dist/stiki-${VERSION}-x64.dmg"
+for arch in $release_arches; do
+  echo "Built dist/stiki-${VERSION}-${arch}.dmg"
+done

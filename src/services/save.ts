@@ -4,18 +4,21 @@ import throttle from "throttleit";
 import type { TabState, ThemeState } from "../types/tab";
 import type { WindowState } from "../types/window";
 import { Logger } from "../utils/common/logger";
+import type { TranscriptSettingsState } from "./transcript";
 import { getDefaultStateValues } from "./utils/get-default-store";
 
 export enum StateKey {
   WindowState = "window-state",
   TabState = "tab-state",
   ThemeState = "theme-state",
+  TranscriptSettingsState = "transcript-settings-state",
 }
 
 export interface StateValues {
   [StateKey.WindowState]: Readonly<WindowState>;
   [StateKey.TabState]: Readonly<TabState>;
   [StateKey.ThemeState]: Readonly<ThemeState>;
+  [StateKey.TranscriptSettingsState]: Readonly<TranscriptSettingsState>;
 }
 
 interface Options {

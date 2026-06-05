@@ -3,6 +3,7 @@ import type { EditorService } from "../editor";
 import { StateKey, type StateValues } from "../save";
 import type { TabService } from "../tab";
 import type { ThemeService } from "../theme";
+import type { TranscriptService } from "../transcript";
 import type { WindowService } from "../window";
 
 export async function restoreState({
@@ -10,6 +11,7 @@ export async function restoreState({
   tabService,
   themeService,
   windowService,
+  transcriptService,
   stateValues,
   options,
 }: {
@@ -17,11 +19,15 @@ export async function restoreState({
   tabService: TabService;
   editorService: EditorService;
   windowService: WindowService;
+  transcriptService?: TranscriptService;
   stateValues: StateValues;
   options?: SetStateOptions;
 }) {
   // themeService
   themeService.restoreFromState(stateValues[StateKey.ThemeState], options);
+
+  // transcriptService
+  transcriptService?.restoreSettings(stateValues[StateKey.TranscriptSettingsState]);
 
   // tabService
   tabService.restoreFromState(stateValues[StateKey.TabState], options);

@@ -1,3 +1,5 @@
+mod transcript;
+
 use tauri::Manager;
 use tauri::WindowEvent;
 use tauri_plugin_autostart::MacosLauncher;
@@ -192,6 +194,7 @@ pub fn run() {
 
     // buidler with plugin
     let builder = tauri::Builder::default()
+        .manage(transcript::NativeTranscriptState::default())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
@@ -222,7 +225,11 @@ pub fn run() {
             toggle_window,
             hide_dock_icon,
             read_markdown_file,
-            write_markdown_file
+            write_markdown_file,
+            transcript::list_sensevoice_models,
+            transcript::open_sensevoice_models_dir,
+            transcript::start_native_transcript,
+            transcript::stop_native_transcript
         ])
         .setup(move |app| {
             // tray

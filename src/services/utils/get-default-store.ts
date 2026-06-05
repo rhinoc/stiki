@@ -33,5 +33,13 @@ export function getDefaultStateValues(): StateValues {
       sizeBeforeFold: null,
     },
     [StateKey.ThemeState]: DEFAULT_THEME,
+    [StateKey.TranscriptSettingsState]: {
+      selectedSource: "both",
+      locale: "auto",
+      backend: "apple",
+      senseVoiceModel: "",
+      includeTimestamp: true,
+      includeSpeaker: true,
+    },
   });
 }

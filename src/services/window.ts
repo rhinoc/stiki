@@ -31,6 +31,8 @@ export class WindowService extends BaseService<State> {
 
   private readonly _options: Options;
 
+  private _allowFoldSize = false;
+
   protected _state: State = {
     float: false,
     fold: false,
@@ -94,7 +96,21 @@ export class WindowService extends BaseService<State> {
         if (!this._state.scaleFactor) {
           return;
         }
-        this.setState("size", getLogicalSize(payload, this._state.scaleFactor), {
+
+        const size = getLogicalSize(payload, this._state.scaleFactor);
+        const minHeight = this._state.fold ? this._options.headerHeight : this._options.minHeight;
+        const safeSize = this._clampSize(size, minHeight);
+        if (!safeSize) {
+          return;
+        }
+
+        if (safeSize[0] !== size[0] || safeSize[1] !== size[1]) {
+          this._window.setSize(new LogicalSize(...safeSize)).catch((error) => {
+            Logger.warn("[WindowService#onResized] setSize failed", error);
+          });
+        }
+
+        this.setState("size", safeSize, {
           apply: false,
         });
       }, wait),
@@ -197,6 +213,19 @@ export class WindowService extends BaseService<State> {
 
   private async _applyRestoredGeometry(state: State): Promise<void> {
     const minHeight = state.fold ? this._options.headerHeight : this._options.minHeight;
+    await this._window.setAlwaysOnTop(state.float).catch((error) => {
+      Logger.warn("[WindowService#_applyRestoredGeometry] setAlwaysOnTop failed", error);
+    });
+
+    if (!state.fold) {
+      await this._window.setResizable(true).catch((error) => {
+        Logger.warn("[WindowService#_applyRestoredGeometry] setResizable failed", error);
+      });
+      await this._window.setMaximizable(true).catch((error) => {
+        Logger.warn("[WindowService#_applyRestoredGeometry] setMaximizable failed", error);
+      });
+    }
+
     await this._window.setMinSize(new LogicalSize(this._options.minWidth, minHeight)).catch((error) => {
       Logger.warn("[WindowService#_applyRestoredGeometry] setMinSize failed", error);
     });
@@ -212,6 +241,15 @@ export class WindowService extends BaseService<State> {
         Logger.warn("[WindowService#_applyRestoredGeometry] setPosition failed", error);
       });
     }
+
+    if (state.fold) {
+      await this._window.setResizable(false).catch((error) => {
+        Logger.warn("[WindowService#_applyRestoredGeometry] setResizable failed", error);
+      });
+      await this._window.setMaximizable(false).catch((error) => {
+        Logger.warn("[WindowService#_applyRestoredGeometry] setMaximizable failed", error);
+      });
+    }
   }
 
   protected _applyFnMap: Partial<{
@@ -224,8 +262,7 @@ export class WindowService extends BaseService<State> {
   }> = {
     float: (value) => this._window.setAlwaysOnTop(value),
     size: (value) => {
-      const minHeight =
-        value && value[1] <= this._options.headerHeight ? this._options.headerHeight : this._options.minHeight;
+      const minHeight = this._allowFoldSize || this._state.fold ? this._options.headerHeight : this._options.minHeight;
       const safeSize = this._clampSize(value, minHeight);
       if (!safeSize) {
         return false;
@@ -247,10 +284,20 @@ export class WindowService extends BaseService<State> {
           return false;
         }
         this._window.setMinSize(new LogicalSize(this._options.minWidth, this._options.headerHeight));
-        this.setStates({
-          sizeBeforeFold: this._state.size,
-          size: [this._state.size[0], this._options.headerHeight],
-        });
+        this._allowFoldSize = true;
+        try {
+          this.setStates(
+            {
+              sizeBeforeFold: this._state.size,
+              size: [this._state.size[0], this._options.headerHeight],
+            },
+            {
+              emit: false,
+            },
+          );
+        } finally {
+          this._allowFoldSize = false;
+        }
         this._window.setResizable(false);
         this._window.setMaximizable(false);
       } else {
@@ -267,10 +314,15 @@ export class WindowService extends BaseService<State> {
         this._window.setMaximizable(true);
         this._window.setMinSize(new LogicalSize(this._options.minWidth, this._options.minHeight));
         if (this._state.sizeBeforeFold) {
-          this.setStates({
-            size: this._state.sizeBeforeFold,
-            sizeBeforeFold: null,
-          });
+          this.setStates(
+            {
+              size: this._state.sizeBeforeFold,
+              sizeBeforeFold: null,
+            },
+            {
+              emit: false,
+            },
+          );
         }
       }
     },
@@ -289,29 +341,35 @@ export class WindowService extends BaseService<State> {
   }
 
   async restoreFromState(state: State, options?: SetStateOptions): Promise<void> {
-    if (!state.fold && state.size && state.size[1] <= this._options.headerHeight) {
-      state.fold = true;
-      state.sizeBeforeFold = [Math.max(state.size[0], this._options.minWidth), this._options.minHeight];
+    const normalizedState: State = {
+      ...state,
+      size: null,
+      position: state.position ? [state.position[0], state.position[1]] : null,
+      sizeBeforeFold: null,
+    };
+
+    const sizeBeforeFold = this._clampSize(state.sizeBeforeFold);
+
+    if (state.fold && sizeBeforeFold && sizeBeforeFold[1] > this._options.minHeight) {
+      const restoredSize = this._clampSize(state.size, this._options.headerHeight);
+      normalizedState.fold = true;
+      normalizedState.size = [
+        Math.max(restoredSize?.[0] ?? sizeBeforeFold[0], this._options.minWidth),
+        this._options.headerHeight,
+      ];
+      normalizedState.sizeBeforeFold = sizeBeforeFold;
+    } else {
+      normalizedState.fold = false;
+      normalizedState.size = this._clampSize(state.size);
     }
 
-    if (state.fold) {
-      if (!state.sizeBeforeFold || (state.size && state.size[1] > this._options.headerHeight)) {
-        state.fold = false;
-      } else {
-        state.size = this._clampSize(state.size, this._options.headerHeight);
-        state.sizeBeforeFold[0] = Math.max(state.sizeBeforeFold[0], this._options.minWidth);
-        state.sizeBeforeFold[1] = Math.max(state.sizeBeforeFold[1], this._options.minHeight);
-      }
-    }
+    normalizedState.position = await this._sanitizePosition(normalizedState.position, normalizedState.size);
 
-    if (!state.fold) {
-      state.size = this._clampSize(state.size);
-    }
-
-    state.position = await this._sanitizePosition(state.position, state.size);
-
-    super.restoreFromState(state, options);
-    await this._applyRestoredGeometry(state);
+    super.restoreFromState(normalizedState, {
+      ...options,
+      apply: false,
+    });
+    await this._applyRestoredGeometry(normalizedState);
   }
 
   close() {
