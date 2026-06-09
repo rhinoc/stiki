@@ -49,8 +49,8 @@ export const TRANSCRIPT_SPEAKER_COUNT_OPTIONS = [
 export type TranscriptSpeakerCount = (typeof TRANSCRIPT_SPEAKER_COUNT_OPTIONS)[number]["speakerCount"];
 
 export const TRANSCRIPT_SILENCE_TIMEOUT_OPTIONS = [
-  { label: "Balanced (1.2s)", silenceTimeoutMs: 1200 },
   { label: "Fast (0.8s)", silenceTimeoutMs: 800 },
+  { label: "Balanced (1.2s)", silenceTimeoutMs: 1200 },
   { label: "Patient (1.8s)", silenceTimeoutMs: 1800 },
   { label: "Long (2.5s)", silenceTimeoutMs: 2500 },
 ] as const;
