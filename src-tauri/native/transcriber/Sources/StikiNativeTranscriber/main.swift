@@ -664,7 +664,7 @@ final class FunASRPipeline: AudioPipeline, @unchecked Sendable {
             try startWorker()
         }
         writer.emit(.debug("funasr backend started model=\(model) locale=\(localeIdentifier)", source: source))
-        try preloadModel()
+        preloadModelInBackground()
     }
 
     func append(_ buffer: AVAudioPCMBuffer) {
@@ -743,8 +743,23 @@ final class FunASRPipeline: AudioPipeline, @unchecked Sendable {
         pendingTranscriptions = 0
     }
 
-    private func preloadModel() throws {
-        try transcriptionQueue.sync {
+    private func preloadModelInBackground() {
+        transcriptionQueue.async { [weak self] in
+            guard let self else {
+                return
+            }
+
+            do {
+                try self.preloadModelOnTranscriptionQueue()
+            } catch {
+                if self.isAcceptingTranscription() {
+                    self.writer.emit(.error(error.localizedDescription, source: self.source))
+                }
+            }
+        }
+    }
+
+    private func preloadModelOnTranscriptionQueue() throws {
             guard isAcceptingTranscription(), !modelPreloaded else {
                 return
             }
@@ -773,7 +788,6 @@ final class FunASRPipeline: AudioPipeline, @unchecked Sendable {
                     source: source
                 )
             )
-        }
     }
 
     private func isAcceptingTranscription() -> Bool {
