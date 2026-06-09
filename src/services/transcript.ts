@@ -271,6 +271,39 @@ export class TranscriptService extends BaseService<TranscriptState, TranscriptEv
     await this.refreshFunASRModelBundles();
   }
 
+  async preloadFunASRModel(source: TranscriptSource = this._state.selectedSource) {
+    if (this._state.backend !== "funasr-local" || !this._state.funASRModelBundle || this.isRecording) {
+      return;
+    }
+
+    await invoke(TauriCommand.PreloadFunASRModel, {
+      source,
+      locale: getEffectiveTranscriptLocale(this._state.locale),
+      model: this._state.funASRModelBundle,
+      speakerCount: this._state.speakerCount,
+      silenceTimeoutMs: this._state.silenceTimeoutMs,
+    });
+  }
+
+  async prepareFunASRModel(source: TranscriptSource = this._state.selectedSource) {
+    if (this._state.backend !== "funasr-local" || this.isRecording) {
+      return;
+    }
+
+    const hasLoadedSelectedModel = this._state.funASRModelBundleOptions.some(
+      (option) => option.model === this._state.funASRModelBundle,
+    );
+    if (!this._state.funASRModelBundle || !hasLoadedSelectedModel) {
+      await this.refreshFunASRModelBundles();
+    }
+
+    await this.preloadFunASRModel(source);
+  }
+
+  async shutdownNativeTranscript() {
+    await invoke(TauriCommand.ShutdownNativeTranscript);
+  }
+
   async start(source: TranscriptSource = this._state.selectedSource) {
     if (this.isRecording) {
       return;
@@ -345,6 +378,7 @@ export class TranscriptService extends BaseService<TranscriptState, TranscriptEv
 
   dispose() {
     this.stop();
+    void this.shutdownNativeTranscript();
   }
 
   private async _listen() {

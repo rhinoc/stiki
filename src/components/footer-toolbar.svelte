@@ -95,6 +95,10 @@ const showTranscriptError = async (error: unknown) => {
   });
 };
 
+const prepareFunASRModel = () => {
+  void transcriptService.prepareFunASRModel().catch(showTranscriptError);
+};
+
 const runMarkdownFileAction = (action: () => Promise<void> | void) => {
   void Promise.resolve(action()).catch(showMarkdownFileError);
 };
@@ -258,34 +262,51 @@ const handleTranscriptToggle = async (source: TranscriptSource = transcriptServi
 
 const handleTranscriptSourceChange = (source: TranscriptSource) => {
   transcriptService.setSelectedSource(source);
+  prepareFunASRModel();
 };
 
 const handleTranscriptLanguageChange = (locale: TranscriptLocale) => {
   transcriptService.setLocale(locale);
+  prepareFunASRModel();
 };
 
 const handleTranscriptBackendChange = (backend: TranscriptBackend) => {
   transcriptService.setBackend(backend);
+  if (backend === "funasr-local") {
+    prepareFunASRModel();
+    return;
+  }
+
+  void transcriptService.shutdownNativeTranscript().catch(showTranscriptError);
 };
 
 const handleFunASRModelBundleChange = (model: string) => {
   transcriptService.setFunASRModelBundle(model);
+  prepareFunASRModel();
 };
 
 const handleTranscriptSpeakerCountChange = (speakerCount: TranscriptSpeakerCount) => {
   transcriptService.setSpeakerCount(speakerCount);
+  prepareFunASRModel();
 };
 
 const handleTranscriptSilenceTimeoutChange = (silenceTimeoutMs: TranscriptSilenceTimeoutMs) => {
   transcriptService.setSilenceTimeoutMs(silenceTimeoutMs);
+  prepareFunASRModel();
 };
 
 const handleOpenFunASRModelsDirectory = () => {
-  void transcriptService.openFunASRModelsDirectory().catch(showTranscriptError);
+  void transcriptService
+    .openFunASRModelsDirectory()
+    .then(prepareFunASRModel)
+    .catch(showTranscriptError);
 };
 
 const handleRefreshFunASRModelBundles = () => {
-  void transcriptService.refreshFunASRModelBundles().catch(showTranscriptError);
+  void transcriptService
+    .refreshFunASRModelBundles()
+    .then(prepareFunASRModel)
+    .catch(showTranscriptError);
 };
 
 const handleTranscriptTimestampChange = () => {

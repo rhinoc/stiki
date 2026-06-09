@@ -228,6 +228,8 @@ pub fn run() {
             write_markdown_file,
             transcript::list_funasr_model_bundles,
             transcript::open_funasr_models_dir,
+            transcript::preload_funasr_model,
+            transcript::shutdown_native_transcript,
             transcript::start_native_transcript,
             transcript::stop_native_transcript
         ])

@@ -89,6 +89,10 @@ struct TranscriptMessage: Encodable {
     }
 }
 
+struct NativeControlMessage: Decodable {
+    let type: String
+}
+
 func nowMillis() -> Int64 {
     Int64(Date().timeIntervalSince1970 * 1000)
 }
@@ -1273,6 +1277,7 @@ final class NativeTranscriber: @unchecked Sendable {
     private var pipeline: AudioPipeline?
     private var microphoneCapture: MicrophoneCapture?
     private var systemAudioCapture: SystemAudioCapture?
+    private var isCapturing = false
 
     init(
         source: TranscriptSource,
@@ -1294,8 +1299,12 @@ final class NativeTranscriber: @unchecked Sendable {
         self.funASRScript = funASRScript
     }
 
-    func start() async throws {
-        let pipeline: AudioPipeline = switch backend {
+    func preload() async throws {
+        if pipeline != nil {
+            return
+        }
+
+        let nextPipeline: AudioPipeline = switch backend {
         case .apple:
             SpeechRecognitionPipeline(source: source, writer: writer)
         case .funASRLocal:
@@ -1310,8 +1319,16 @@ final class NativeTranscriber: @unchecked Sendable {
             )
         }
 
-        try await pipeline.start(localeIdentifier: localeIdentifier)
-        self.pipeline = pipeline
+        try await nextPipeline.start(localeIdentifier: localeIdentifier)
+        pipeline = nextPipeline
+    }
+
+    func startCapture() async throws {
+        try await preload()
+
+        guard !isCapturing, let pipeline else {
+            return
+        }
 
         switch source {
         case .microphone:
@@ -1324,14 +1341,27 @@ final class NativeTranscriber: @unchecked Sendable {
             systemAudioCapture = capture
         }
 
+        isCapturing = true
         writer.emit(.status("started", source: source))
     }
 
-    func stop() async {
+    func stopCapture() async {
+        guard isCapturing || microphoneCapture != nil || systemAudioCapture != nil else {
+            return
+        }
+
         microphoneCapture?.stop()
         await systemAudioCapture?.stop()
-        pipeline?.stop()
+        microphoneCapture = nil
+        systemAudioCapture = nil
+        isCapturing = false
         writer.emit(.status("stopped", source: source))
+    }
+
+    func shutdown() async {
+        await stopCapture()
+        pipeline?.stop()
+        pipeline = nil
     }
 }
 
@@ -1343,7 +1373,7 @@ func parsePositiveInt(_ value: String, fallback: Int) -> Int {
     return parsed
 }
 
-func parseArguments() -> (TranscriptSource, String, TranscriptBackend, String, Int, Int, String, String) {
+func parseArguments() -> (TranscriptSource, String, TranscriptBackend, String, Int, Int, String, String, Bool, Bool) {
     var source = TranscriptSource.system
     var locale = Locale.current.identifier.replacingOccurrences(of: "_", with: "-")
     var backend = TranscriptBackend.apple
@@ -1352,6 +1382,8 @@ func parseArguments() -> (TranscriptSource, String, TranscriptBackend, String, I
     var silenceTimeoutMs = 1200
     var funASRPython = ""
     var funASRScript = ""
+    var serverMode = false
+    var startCapture = false
     let arguments = CommandLine.arguments
     var index = 1
 
@@ -1383,6 +1415,10 @@ func parseArguments() -> (TranscriptSource, String, TranscriptBackend, String, I
         case "--funasr-script" where index + 1 < arguments.count:
             funASRScript = arguments[index + 1]
             index += 1
+        case "--server":
+            serverMode = true
+        case "--start-capture":
+            startCapture = true
         default:
             break
         }
@@ -1390,13 +1426,24 @@ func parseArguments() -> (TranscriptSource, String, TranscriptBackend, String, I
         index += 1
     }
 
-    return (source, locale, backend, model, speakerCount, silenceTimeoutMs, funASRPython, funASRScript)
+    return (source, locale, backend, model, speakerCount, silenceTimeoutMs, funASRPython, funASRScript, serverMode, startCapture)
 }
 
 @main
 struct Main {
     static func main() async {
-        let (source, locale, backend, model, speakerCount, silenceTimeoutMs, funASRPython, funASRScript) = parseArguments()
+        let (
+            source,
+            locale,
+            backend,
+            model,
+            speakerCount,
+            silenceTimeoutMs,
+            funASRPython,
+            funASRScript,
+            serverMode,
+            startCapture
+        ) = parseArguments()
         let transcriber = NativeTranscriber(
             source: source,
             localeIdentifier: locale,
@@ -1413,16 +1460,46 @@ struct Main {
         signal(SIGTERM, SIG_IGN)
         signalSource.setEventHandler {
             Task {
-                await transcriber.stop()
+                await transcriber.shutdown()
                 Foundation.exit(0)
             }
         }
         signalSource.resume()
 
         do {
-            try await transcriber.start()
-            while true {
-                try await Task.sleep(nanoseconds: 60_000_000_000)
+            if serverMode {
+                try await transcriber.preload()
+                if startCapture {
+                    try await transcriber.startCapture()
+                }
+
+                let decoder = JSONDecoder()
+                while let line = readLine() {
+                    guard let data = line.data(using: .utf8),
+                          let message = try? decoder.decode(NativeControlMessage.self, from: data)
+                    else {
+                        continue
+                    }
+
+                    switch message.type {
+                    case "startCapture":
+                        try await transcriber.startCapture()
+                    case "stopCapture":
+                        await transcriber.stopCapture()
+                    case "shutdown":
+                        await transcriber.shutdown()
+                        Foundation.exit(0)
+                    default:
+                        break
+                    }
+                }
+
+                await transcriber.shutdown()
+            } else {
+                try await transcriber.startCapture()
+                while true {
+                    try await Task.sleep(nanoseconds: 60_000_000_000)
+                }
             }
         } catch {
             writer.emit(.error(error.localizedDescription, source: source))

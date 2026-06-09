@@ -132,6 +132,9 @@ onMount(async () => {
   });
   await windowService.init(); // in case restored data is invalid, init later to overwrite
   saveService.startSaveToDisk();
+  void transcriptService.prepareFunASRModel().catch((error) => {
+    Logger.warn(`Failed to preload FunASR model: ${error instanceof Error ? error.message : String(error)}`);
+  });
   // #endregion restore from store
 
   // #region set initial state

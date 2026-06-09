@@ -7,6 +7,8 @@ export enum TauriCommand {
   WriteMarkdownFile = "write_markdown_file",
   ListFunASRModelBundles = "list_funasr_model_bundles",
   OpenFunASRModelsDir = "open_funasr_models_dir",
+  PreloadFunASRModel = "preload_funasr_model",
+  ShutdownNativeTranscript = "shutdown_native_transcript",
   StartNativeTranscript = "start_native_transcript",
   StopNativeTranscript = "stop_native_transcript",
 }
