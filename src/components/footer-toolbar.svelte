@@ -14,10 +14,14 @@ import type { ThemeService } from "../services/theme";
 import {
   TRANSCRIPT_BACKEND_OPTIONS,
   TRANSCRIPT_LANGUAGE_OPTIONS,
+  TRANSCRIPT_SILENCE_TIMEOUT_OPTIONS,
+  TRANSCRIPT_SPEAKER_COUNT_OPTIONS,
   TRANSCRIPT_SOURCE_OPTIONS,
   type TranscriptBackend,
   type TranscriptLocale,
+  type TranscriptSilenceTimeoutMs,
   type TranscriptService,
+  type TranscriptSpeakerCount,
   type TranscriptSource,
 } from "../services/transcript";
 import { getRandomEmoji } from "../utils/common/get-random-emoji";
@@ -205,16 +209,31 @@ const getTranscriptBackendLabel = () => {
   return TRANSCRIPT_BACKEND_OPTIONS.find((option) => option.backend === transcriptService.state.backend)?.label ?? "Apple Speech";
 };
 
-const getSenseVoiceModelLabel = () => {
-  if (!transcriptService.state.senseVoiceModel) {
+const getFunASRModelBundleLabel = () => {
+  if (!transcriptService.state.funASRModelBundle) {
     return "None";
   }
 
   return (
-    transcriptService.state.senseVoiceModelOptions.find((option) => option.model === transcriptService.state.senseVoiceModel)
+    transcriptService.state.funASRModelBundleOptions.find((option) => option.model === transcriptService.state.funASRModelBundle)
       ?.label ??
-    transcriptService.state.senseVoiceModel.split(/[\\/]/).at(-1) ??
+    transcriptService.state.funASRModelBundle.split(/[\\/]/).at(-1) ??
     "None"
+  );
+};
+
+const getTranscriptSpeakerCountLabel = () => {
+  return (
+    TRANSCRIPT_SPEAKER_COUNT_OPTIONS.find((option) => option.speakerCount === transcriptService.state.speakerCount)?.label ??
+    "2"
+  );
+};
+
+const getTranscriptSilenceTimeoutLabel = () => {
+  return (
+    TRANSCRIPT_SILENCE_TIMEOUT_OPTIONS.find(
+      (option) => option.silenceTimeoutMs === transcriptService.state.silenceTimeoutMs,
+    )?.label ?? "Balanced (1.2s)"
   );
 };
 
@@ -249,16 +268,24 @@ const handleTranscriptBackendChange = (backend: TranscriptBackend) => {
   transcriptService.setBackend(backend);
 };
 
-const handleSenseVoiceModelChange = (model: string) => {
-  transcriptService.setSenseVoiceModel(model);
+const handleFunASRModelBundleChange = (model: string) => {
+  transcriptService.setFunASRModelBundle(model);
 };
 
-const handleOpenSenseVoiceModelsDirectory = () => {
-  void transcriptService.openSenseVoiceModelsDirectory().catch(showTranscriptError);
+const handleTranscriptSpeakerCountChange = (speakerCount: TranscriptSpeakerCount) => {
+  transcriptService.setSpeakerCount(speakerCount);
 };
 
-const handleRefreshSenseVoiceModels = () => {
-  void transcriptService.refreshSenseVoiceModels().catch(showTranscriptError);
+const handleTranscriptSilenceTimeoutChange = (silenceTimeoutMs: TranscriptSilenceTimeoutMs) => {
+  transcriptService.setSilenceTimeoutMs(silenceTimeoutMs);
+};
+
+const handleOpenFunASRModelsDirectory = () => {
+  void transcriptService.openFunASRModelsDirectory().catch(showTranscriptError);
+};
+
+const handleRefreshFunASRModelBundles = () => {
+  void transcriptService.refreshFunASRModelBundles().catch(showTranscriptError);
 };
 
 const handleTranscriptTimestampChange = () => {
@@ -272,9 +299,9 @@ const handleTranscriptSpeakerChange = () => {
 const handleClick = async () => {
   const currentTabHasFile = !!tabService.currentTab.filePath;
   if (!transcriptService.isRecording) {
-    await transcriptService.refreshSenseVoiceModels().catch(showTranscriptError);
+    await transcriptService.refreshFunASRModelBundles().catch(showTranscriptError);
   }
-  const menuItems = await Promise.all([
+  const transcriptItems = await Promise.all([
     Submenu.new({
       text: `Source: ${getTranscriptSourceLabel()}`,
       enabled: !transcriptService.isRecording,
@@ -304,39 +331,65 @@ const handleClick = async () => {
     Submenu.new({
       text: `Backend: ${getTranscriptBackendLabel()}`,
       enabled: !transcriptService.isRecording,
-      items: await Promise.all(
-        TRANSCRIPT_BACKEND_OPTIONS.map((option) =>
+      items: await Promise.all([
+        ...TRANSCRIPT_BACKEND_OPTIONS.map((option) =>
           CheckMenuItem.new({
             text: option.label,
             checked: transcriptService.state.backend === option.backend,
             action: () => handleTranscriptBackendChange(option.backend),
           }),
         ),
-      ),
-    }),
-    Submenu.new({
-      text: `SenseVoice Model: ${getSenseVoiceModelLabel()}`,
-      enabled: !transcriptService.isRecording && transcriptService.state.backend === "sensevoice-local",
-      items: await Promise.all([
-        ...transcriptService.state.senseVoiceModelOptions.map((option) =>
-          CheckMenuItem.new({
-            text: option.isLocal ? `${option.label} (Local)` : option.label,
-            checked: transcriptService.state.senseVoiceModel === option.model,
-            action: () => handleSenseVoiceModelChange(option.model),
-          }),
-        ),
-        MenuItem.new({
-          text: "Open Models Folder...",
-          action: handleOpenSenseVoiceModelsDirectory,
-        }),
-        MenuItem.new({
-          text: "Refresh Models",
-          action: handleRefreshSenseVoiceModels,
+        Submenu.new({
+          text: `Model Bundle: ${getFunASRModelBundleLabel()}`,
+          enabled: transcriptService.state.backend === "funasr-local",
+          items: await Promise.all([
+            ...transcriptService.state.funASRModelBundleOptions.map((option) =>
+              CheckMenuItem.new({
+                text: option.isLocal ? `${option.label} (Local)` : option.label,
+                checked: transcriptService.state.funASRModelBundle === option.model,
+                action: () => handleFunASRModelBundleChange(option.model),
+              }),
+            ),
+            MenuItem.new({
+              text: "Open Models Folder...",
+              action: handleOpenFunASRModelsDirectory,
+            }),
+            MenuItem.new({
+              text: "Refresh Models",
+              action: handleRefreshFunASRModelBundles,
+            }),
+          ]),
         }),
       ]),
     }),
     Submenu.new({
-      text: "Transcript Format",
+      text: `Max Speakers: ${getTranscriptSpeakerCountLabel()}`,
+      enabled: !transcriptService.isRecording && transcriptService.state.backend === "funasr-local",
+      items: await Promise.all(
+        TRANSCRIPT_SPEAKER_COUNT_OPTIONS.map((option) =>
+          CheckMenuItem.new({
+            text: option.label,
+            checked: transcriptService.state.speakerCount === option.speakerCount,
+            action: () => handleTranscriptSpeakerCountChange(option.speakerCount),
+          }),
+        ),
+      ),
+    }),
+    Submenu.new({
+      text: `Silence Timeout: ${getTranscriptSilenceTimeoutLabel()}`,
+      enabled: !transcriptService.isRecording && transcriptService.state.backend === "funasr-local",
+      items: await Promise.all(
+        TRANSCRIPT_SILENCE_TIMEOUT_OPTIONS.map((option) =>
+          CheckMenuItem.new({
+            text: option.label,
+            checked: transcriptService.state.silenceTimeoutMs === option.silenceTimeoutMs,
+            action: () => handleTranscriptSilenceTimeoutChange(option.silenceTimeoutMs),
+          }),
+        ),
+      ),
+    }),
+    Submenu.new({
+      text: "Format",
       enabled: !transcriptService.isRecording,
       items: await Promise.all([
         CheckMenuItem.new({
@@ -345,11 +398,17 @@ const handleClick = async () => {
           action: handleTranscriptTimestampChange,
         }),
         CheckMenuItem.new({
-          text: "Speaker",
+          text: "Speaker Labels",
           checked: transcriptService.state.includeSpeaker,
           action: handleTranscriptSpeakerChange,
         }),
       ]),
+    }),
+  ]);
+  const menuItems = await Promise.all([
+    Submenu.new({
+      text: "Transcript",
+      items: transcriptItems,
     }),
     Submenu.new({
       text: "Markdown File",

@@ -3,7 +3,7 @@
   <img src="./src-tauri/icons/icon.png" alt="Stiki app icon" width="112" height="112" />
   <h1>Stiki</h1>
   <p>Your notes, always close by.<br />
-  Keep rich Markdown sticky notes in a compact native macOS window, link tabs to real files, tune the theme, and bring the app back from the tray or a deep link whenever you need it.</p>
+  A compact native macOS sticky-note app for rich Markdown notes, linked files, theme tuning, and live transcript capture.</p>
   <p>
     <a href="https://github.com/rhinoc/stiki/releases">Releases</a>
     &nbsp;·&nbsp;
@@ -41,10 +41,10 @@
 ## Features
 
 - 📝 **Markdown sticky notes** — Keep quick notes in a compact rich editor with task lists, links, code blocks, images, and clean Markdown output.
-- 🔗 **Real files when you want them** — Link a tab to a `.md` or `.markdown` file and let Stiki autosave changes back to disk.
+- 🔗 **Linked Markdown files** — Link a tab to a `.md` or `.markdown` file and let Stiki autosave changes back to disk.
 - 🗂️ **A few notes, one small window** — Switch between labeled tabs without turning your desktop into a pile of note windows.
 - 📌 **Always within reach** — Pin it above other windows, fold it down, hide it to the tray, or bring it back with `stiki://toggle-window`.
-- 🎙️ **Live transcript notes** — Append microphone or system-audio transcript snippets into the current note with Apple Speech by default and optional local SenseVoice models.
+- 🎙️ **Live transcript capture** — Append mic or system-audio transcripts to the current note with Apple Speech, or use local FunASR bundles for speaker-labeled segments.
 
 ## Requirements
 
@@ -106,35 +106,77 @@ Use the microphone button in the footer toolbar to start or stop transcript capt
 
 The transcript backend defaults to **Apple Speech**. Apple Speech uses macOS speech recognition and does not require a local model folder.
 
-The footer toolbar menu includes transcript settings for source, language, backend, local SenseVoice model, and output format. Transcript format can include or omit a 24-hour timestamp and speaker prefix. When speaker is enabled, snippets are written with `Mic:` or `System:`.
+The footer toolbar menu includes transcript settings for source, language, backend, local FunASR model bundle, max speakers, silence timeout, and output format. Transcript format can include or omit a 24-hour timestamp and speaker label. With Apple Speech, speaker labels fall back to the audio source (`Mic:` or `System:`). With FunASR, Stiki uses the user-provided speaker model for diarization and writes labels such as `Speaker 1:` when FunASR returns speaker-attributed segments. For small conversations, set **Max Speakers** to the largest expected number of speakers to keep embedding drift from creating extra labels. Increase **Silence Timeout** when transcript segments are being cut too aggressively.
 
-#### Local SenseVoice models
+#### Local FunASR models
 
-SenseVoice models are user-provided. Stiki release builds include the local inference runtime, but model files are not bundled or committed to this repository. Users can keep large model directories wherever they prefer.
+FunASR models are bring-your-own-model. Stiki release builds include the local inference runtime, but model files are not bundled, committed, or downloaded by Stiki. Users must provide every model directory locally and can keep large model directories wherever they prefer.
 
-To add a local SenseVoice model:
+To add a local FunASR model bundle:
 
 1. Open the footer toolbar menu.
-2. Choose **Backend: SenseVoice**.
-3. Choose **SenseVoice Model → Open Models Folder...**.
-4. Put a model directory in that folder, or create a symbolic link to a model directory stored elsewhere.
-5. Choose **SenseVoice Model → Refresh Models**.
-6. Select the model from the **SenseVoice Model** submenu.
+2. Choose **Backend: FunASR**.
+3. Choose **FunASR Model Bundle → Open Models Folder...**.
+4. Put a complete model bundle directory in that folder, or create a symbolic link to a bundle stored elsewhere.
+5. Choose **FunASR Model Bundle → Refresh Models**.
+6. Select the model bundle from the **FunASR Model Bundle** submenu.
 
 The models folder is:
 
 ```text
-~/Library/Application Support/com.rhinoc.stiki/sensevoice-models/
+~/Library/Application Support/com.rhinoc.stiki/funasr-models/
 ```
 
-Each direct child directory or symbolic link is treated as one selectable model. For example:
+Each direct child directory or symbolic link is treated as one selectable model bundle only when it contains all required subdirectories:
+
+```text
+MyFunASRBundle/
+  asr/      # ASR model, for example SenseVoiceSmall
+  vad/      # VAD model, for example FSMN-VAD
+  punc/     # punctuation model, for example CT-Punc
+  speaker/  # speaker embedding/diarization model, for example CAM++
+```
+
+To download the example ModelScope models and expose them as one Stiki bundle:
 
 ```bash
-ln -s ~/.cache/modelscope/hub/models/iic/SenseVoiceSmall \
-  ~/Library/Application\ Support/com.rhinoc.stiki/sensevoice-models/SenseVoiceSmall
+python3 -m pip install --user "modelscope==1.37.1"
+
+python3 <<'PY'
+from pathlib import Path
+from modelscope import snapshot_download
+
+bundle = Path.home() / "funasr-stiki-bundle"
+models_dir = Path.home() / "Library/Application Support/com.rhinoc.stiki/funasr-models"
+bundle.mkdir(parents=True, exist_ok=True)
+models_dir.mkdir(parents=True, exist_ok=True)
+
+
+def replace_symlink(path, target):
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.exists():
+        raise SystemExit(f"{path} exists and is not a symlink; move it first.")
+    path.symlink_to(target, target_is_directory=True)
+
+
+models = {
+    "asr": "iic/SenseVoiceSmall",
+    "vad": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+    "punc": "iic/punc_ct-transformer_cn-en-common-vocab471067-large",
+    "speaker": "iic/speech_campplus_sv_zh-cn_16k-common",
+}
+
+for name, model_id in models.items():
+    replace_symlink(bundle / name, Path(snapshot_download(model_id)).expanduser())
+
+app_bundle = models_dir / "FunASRBundle"
+replace_symlink(app_bundle, bundle)
+print(app_bundle)
+PY
 ```
 
-Different model sizes, checkpoints, or parameter variants can be exposed by adding more directories or links with different names. Stiki lists direct child directories and symlinks, but the SenseVoice/FunASR loader still requires a valid model layout at runtime.
+Different model sizes, checkpoints, or parameter variants can be exposed by adding more complete bundle directories or links with different names. Stiki lists only direct child directories and symlinks that contain `asr/`, `vad/`, `punc/`, and `speaker/`.
 
 ### Deep links
 
@@ -149,7 +191,7 @@ stiki://toggle-window
 | Location | What it stores | Notes |
 | --- | --- | --- |
 | `~/Library/Application Support/com.rhinoc.stiki/` | App-managed settings and note state | Includes the Tauri store data used by Stiki. |
-| `~/Library/Application Support/com.rhinoc.stiki/sensevoice-models/` | User-provided SenseVoice model directories or symlinks | Model files are not committed to this repository. |
+| `~/Library/Application Support/com.rhinoc.stiki/funasr-models/` | User-provided FunASR model bundle directories or symlinks | Model files are not committed to this repository and are not downloaded by Stiki. |
 | User-selected `.md` / `.markdown` files | Linked note content | Stiki writes linked tabs back to these files. |
 
 ## Contributing

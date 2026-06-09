@@ -1,7 +1,7 @@
 {
   "name": "stiki",
   "version": "0.1.13",
-  "description": "A compact macOS sticky note app for rich Markdown notes.",
+  "description": "A compact macOS sticky note app for Markdown notes, linked files, and live transcripts.",
   "type": "module",
   "repository": {
     "type": "git",

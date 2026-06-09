@@ -226,8 +226,8 @@ pub fn run() {
             hide_dock_icon,
             read_markdown_file,
             write_markdown_file,
-            transcript::list_sensevoice_models,
-            transcript::open_sensevoice_models_dir,
+            transcript::list_funasr_model_bundles,
+            transcript::open_funasr_models_dir,
             transcript::start_native_transcript,
             transcript::stop_native_transcript
         ])

@@ -12,7 +12,8 @@ use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
 
 const TRANSCRIPT_EVENT: &str = "native-transcript://event";
-const SENSEVOICE_MODELS_DIR: &str = "sensevoice-models";
+const FUNASR_MODELS_DIR: &str = "funasr-models";
+const FUNASR_REQUIRED_MODEL_DIRS: [&str; 4] = ["asr", "vad", "punc", "speaker"];
 
 #[derive(Default, Clone)]
 pub struct NativeTranscriptState {
@@ -30,6 +31,7 @@ struct NativeTranscriptPayload {
     #[serde(rename = "type")]
     event_type: String,
     source: Option<String>,
+    speaker: Option<String>,
     status: Option<String>,
     text: Option<String>,
     is_final: Option<bool>,
@@ -43,6 +45,7 @@ struct NativeTranscriptErrorPayload {
     #[serde(rename = "type")]
     event_type: &'static str,
     source: Option<String>,
+    speaker: Option<String>,
     status: Option<String>,
     text: Option<String>,
     is_final: Option<bool>,
@@ -52,7 +55,7 @@ struct NativeTranscriptErrorPayload {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SenseVoiceModelOption {
+pub struct FunASRModelBundleOption {
     label: String,
     model: String,
     is_local: bool,
@@ -71,6 +74,7 @@ fn emit_error(app: &tauri::AppHandle, message: String) {
         NativeTranscriptErrorPayload {
             event_type: "error",
             source: None,
+            speaker: None,
             status: None,
             text: None,
             is_final: None,
@@ -111,42 +115,48 @@ fn bundled_resource_path(relative: &[&str]) -> Option<std::path::PathBuf> {
     path.exists().then_some(path)
 }
 
-fn sensevoice_python_path() -> Option<String> {
+fn funasr_python_path() -> Option<String> {
     bundled_resource_path(&["transcriber", "runtime", "bin", "python3.12"])
         .or_else(|| bundled_resource_path(&["transcriber", "runtime", "bin", "python"]))
-        .or_else(|| option_env!("STIKI_SENSEVOICE_PYTHON").map(std::path::PathBuf::from))
+        .or_else(|| option_env!("STIKI_FUNASR_PYTHON").map(std::path::PathBuf::from))
         .filter(|path| path.exists())
         .map(|path| path.to_string_lossy().to_string())
 }
 
-fn sensevoice_script_path() -> Option<String> {
-    bundled_resource_path(&["transcriber", "scripts", "sensevoice_worker.py"])
-        .or_else(|| option_env!("STIKI_SENSEVOICE_SCRIPT").map(std::path::PathBuf::from))
+fn funasr_script_path() -> Option<String> {
+    bundled_resource_path(&["transcriber", "scripts", "funasr_worker.py"])
+        .or_else(|| option_env!("STIKI_FUNASR_SCRIPT").map(std::path::PathBuf::from))
         .filter(|path| path.exists())
         .map(|path| path.to_string_lossy().to_string())
 }
 
-fn sensevoice_models_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+fn funasr_models_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     app.path()
         .app_config_dir()
-        .map(|path| path.join(SENSEVOICE_MODELS_DIR))
-        .map_err(|error| format!("Failed to resolve SenseVoice models folder: {error}"))
+        .map(|path| path.join(FUNASR_MODELS_DIR))
+        .map_err(|error| format!("Failed to resolve FunASR models folder: {error}"))
 }
 
-fn ensure_sensevoice_models_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let path = sensevoice_models_dir(app)?;
+fn ensure_funasr_models_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let path = funasr_models_dir(app)?;
     std::fs::create_dir_all(&path)
-        .map_err(|error| format!("Failed to create SenseVoice models folder {}: {error}", path.display()))?;
+        .map_err(|error| format!("Failed to create FunASR models folder {}: {error}", path.display()))?;
     Ok(path)
 }
 
+fn is_funasr_model_bundle(path: &std::path::Path) -> bool {
+    FUNASR_REQUIRED_MODEL_DIRS
+        .iter()
+        .all(|dirname| path.join(dirname).is_dir())
+}
+
 #[tauri::command]
-pub fn list_sensevoice_models(app: tauri::AppHandle) -> Result<Vec<SenseVoiceModelOption>, String> {
-    let models_dir = ensure_sensevoice_models_dir(&app)?;
+pub fn list_funasr_model_bundles(app: tauri::AppHandle) -> Result<Vec<FunASRModelBundleOption>, String> {
+    let models_dir = ensure_funasr_models_dir(&app)?;
     let mut options = Vec::new();
 
     let entries = std::fs::read_dir(&models_dir)
-        .map_err(|error| format!("Failed to read SenseVoice models folder {}: {error}", models_dir.display()))?;
+        .map_err(|error| format!("Failed to read FunASR models folder {}: {error}", models_dir.display()))?;
 
     for entry in entries.flatten() {
         let Ok(file_type) = entry.file_type() else {
@@ -156,13 +166,16 @@ pub fn list_sensevoice_models(app: tauri::AppHandle) -> Result<Vec<SenseVoiceMod
         if !file_type.is_dir() && !(file_type.is_symlink() && entry_path.is_dir()) {
             continue;
         }
+        if !is_funasr_model_bundle(&entry_path) {
+            continue;
+        }
 
         let label = entry.file_name().to_string_lossy().trim().to_owned();
         if label.is_empty() {
             continue;
         }
 
-        options.push(SenseVoiceModelOption {
+        options.push(FunASRModelBundleOption {
             label,
             model: entry_path.to_string_lossy().to_string(),
             is_local: true,
@@ -174,12 +187,12 @@ pub fn list_sensevoice_models(app: tauri::AppHandle) -> Result<Vec<SenseVoiceMod
 }
 
 #[tauri::command]
-pub fn open_sensevoice_models_dir(app: tauri::AppHandle) -> Result<String, String> {
-    let path = ensure_sensevoice_models_dir(&app)?;
+pub fn open_funasr_models_dir(app: tauri::AppHandle) -> Result<String, String> {
+    let path = ensure_funasr_models_dir(&app)?;
     let path_str = path.to_string_lossy().to_string();
     app.opener()
         .open_path(&path_str, None::<&str>)
-        .map_err(|error| format!("Failed to open SenseVoice models folder {}: {error}", path.display()))?;
+        .map_err(|error| format!("Failed to open FunASR models folder {}: {error}", path.display()))?;
     Ok(path_str)
 }
 
@@ -208,6 +221,8 @@ pub fn start_native_transcript(
     locale: Option<String>,
     backend: Option<String>,
     model: Option<String>,
+    speaker_count: Option<u8>,
+    silence_timeout_ms: Option<u64>,
 ) -> Result<(), String> {
     clean_finished_child(&state);
 
@@ -224,15 +239,17 @@ pub fn start_native_transcript(
     let locale = locale.unwrap_or_else(|| "en-US".to_owned());
     let backend = backend.unwrap_or_else(|| "apple".to_owned());
     let model = model.unwrap_or_else(|| {
-        if backend == "sensevoice-local" {
+        if backend == "funasr-local" {
             String::new()
         } else {
             String::new()
         }
     });
+    let speaker_count = speaker_count.unwrap_or(2).min(8);
+    let silence_timeout_ms = silence_timeout_ms.unwrap_or(1200).clamp(400, 5000);
     let helper_path = native_transcriber_path()?;
-    let sensevoice_python = sensevoice_python_path();
-    let sensevoice_script = sensevoice_script_path();
+    let funasr_python = funasr_python_path();
+    let funasr_script = funasr_script_path();
 
     for source in sources {
         log::info!(
@@ -251,13 +268,17 @@ pub fn start_native_transcript(
             .arg("--backend")
             .arg(&backend)
             .arg("--model")
-            .arg(&model);
+            .arg(&model)
+            .arg("--speaker-count")
+            .arg(speaker_count.to_string())
+            .arg("--silence-timeout-ms")
+            .arg(silence_timeout_ms.to_string());
 
-        if let Some(path) = sensevoice_python.as_ref() {
-            command.arg("--sensevoice-python").arg(path);
+        if let Some(path) = funasr_python.as_ref() {
+            command.arg("--funasr-python").arg(path);
         }
-        if let Some(path) = sensevoice_script.as_ref() {
-            command.arg("--sensevoice-script").arg(path);
+        if let Some(path) = funasr_script.as_ref() {
+            command.arg("--funasr-script").arg(path);
         }
 
         let mut child = command

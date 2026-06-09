@@ -29,7 +29,7 @@
       "files": {
         "MacOS/stiki-native-transcriber": "native/transcriber/bundle/stiki-native-transcriber",
         "Resources/transcriber/runtime": "native/transcriber/bundle/runtime",
-        "Resources/transcriber/scripts/sensevoice_worker.py": "native/transcriber/scripts/sensevoice_worker.py"
+        "Resources/transcriber/scripts/funasr_worker.py": "native/transcriber/scripts/funasr_worker.py"
       },
       "dmg": {
         "background": "res/dmg-background.png",

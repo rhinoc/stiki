@@ -5,8 +5,8 @@ export enum TauriCommand {
   HideDockIcon = "hide_dock_icon",
   ReadMarkdownFile = "read_markdown_file",
   WriteMarkdownFile = "write_markdown_file",
-  ListSenseVoiceModels = "list_sensevoice_models",
-  OpenSenseVoiceModelsDir = "open_sensevoice_models_dir",
+  ListFunASRModelBundles = "list_funasr_model_bundles",
+  OpenFunASRModelsDir = "open_funasr_models_dir",
   StartNativeTranscript = "start_native_transcript",
   StopNativeTranscript = "stop_native_transcript",
 }

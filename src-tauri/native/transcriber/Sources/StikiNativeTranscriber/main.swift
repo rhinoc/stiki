@@ -11,7 +11,7 @@ enum TranscriptSource: String {
 
 enum TranscriptBackend: String {
     case apple
-    case senseVoiceLocal = "sensevoice-local"
+    case funASRLocal = "funasr-local"
 }
 
 protocol AudioPipeline: AnyObject, Sendable {
@@ -23,6 +23,7 @@ protocol AudioPipeline: AnyObject, Sendable {
 struct TranscriptMessage: Encodable {
     let type: String
     let source: String?
+    let speaker: String?
     let status: String?
     let text: String?
     let isFinal: Bool?
@@ -33,6 +34,7 @@ struct TranscriptMessage: Encodable {
         TranscriptMessage(
             type: "status",
             source: source.rawValue,
+            speaker: nil,
             status: status,
             text: nil,
             isFinal: nil,
@@ -41,14 +43,21 @@ struct TranscriptMessage: Encodable {
         )
     }
 
-    static func segment(_ text: String, isFinal: Bool, source: TranscriptSource) -> TranscriptMessage {
+    static func segment(
+        _ text: String,
+        isFinal: Bool,
+        source: TranscriptSource,
+        speaker: String? = nil,
+        createdAt: Int64 = nowMillis()
+    ) -> TranscriptMessage {
         TranscriptMessage(
             type: "segment",
             source: source.rawValue,
+            speaker: speaker,
             status: nil,
             text: text,
             isFinal: isFinal,
-            createdAt: nowMillis(),
+            createdAt: createdAt,
             message: nil
         )
     }
@@ -57,6 +66,7 @@ struct TranscriptMessage: Encodable {
         TranscriptMessage(
             type: "error",
             source: source.rawValue,
+            speaker: nil,
             status: nil,
             text: nil,
             isFinal: nil,
@@ -69,6 +79,7 @@ struct TranscriptMessage: Encodable {
         TranscriptMessage(
             type: "debug",
             source: source.rawValue,
+            speaker: nil,
             status: nil,
             text: nil,
             isFinal: nil,
@@ -107,8 +118,8 @@ enum NativeTranscriberError: Error, LocalizedError {
     case missingDisplay
     case missingCapturableApplications
     case invalidSampleBuffer
-    case missingSenseVoicePython(String)
-    case missingSenseVoiceWorker(String)
+    case missingFunASRPython(String)
+    case missingFunASRWorker(String)
 
     var errorDescription: String? {
         switch self {
@@ -126,10 +137,10 @@ enum NativeTranscriberError: Error, LocalizedError {
             "No other running applications were available for system audio capture."
         case .invalidSampleBuffer:
             "ScreenCaptureKit produced an audio sample buffer that could not be converted."
-        case .missingSenseVoicePython(let path):
-            "SenseVoice Python was not found at \(path)."
-        case .missingSenseVoiceWorker(let path):
-            "SenseVoice worker script was not found at \(path)."
+        case .missingFunASRPython(let path):
+            "FunASR Python was not found at \(path)."
+        case .missingFunASRWorker(let path):
+            "FunASR worker script was not found at \(path)."
         }
     }
 }
@@ -514,12 +525,19 @@ final class AudioEndpointGate {
     }
 }
 
-final class SenseVoicePipeline: AudioPipeline, @unchecked Sendable {
+final class FunASRPipeline: AudioPipeline, @unchecked Sendable {
     private struct WorkerRequest: Encodable {
         let type: String
         let id: Int
         let path: String
         let language: String
+        let model: String
+        let speakerCount: Int
+    }
+
+    private struct WorkerLoadRequest: Encodable {
+        let type: String
+        let id: Int
         let model: String
     }
 
@@ -531,19 +549,30 @@ final class SenseVoicePipeline: AudioPipeline, @unchecked Sendable {
         let type: String
         let id: Int?
         let text: String?
+        let segments: [WorkerSegment]?
         let rawText: String?
         let isSpeech: Bool?
         let durationMs: Int?
         let message: String?
     }
 
+    private struct WorkerSegment: Decodable {
+        let text: String
+        let speaker: String?
+        let startMs: Int?
+        let endMs: Int?
+    }
+
     private let source: TranscriptSource
     private let writer: JSONLineWriter
     private let model: String
+    private let speakerCount: Int
+    private let silenceTimeoutMs: Int
     private let pythonPath: String
     private let scriptPath: String
     private let endpointGate: AudioEndpointGate
-    private let queue = DispatchQueue(label: "com.rhinoc.stiki.transcriber.sensevoice")
+    private let queue = DispatchQueue(label: "com.rhinoc.stiki.transcriber.funasr")
+    private let transcriptionQueue = DispatchQueue(label: "com.rhinoc.stiki.transcriber.funasr.transcription")
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var localeIdentifier = "auto"
@@ -556,16 +585,19 @@ final class SenseVoicePipeline: AudioPipeline, @unchecked Sendable {
     private var process: Process?
     private var stdinPipe: Pipe?
     private var stdoutPipe: Pipe?
+    private var stderrPipe: Pipe?
     private var stopped = false
+    private var acceptingTranscription = true
     private var preRollBuffers: [AVAudioPCMBuffer] = []
     private var preRollFrameCount: AVAudioFramePosition = 0
     private var trailingSilenceSeconds = 0.0
     private var speechSeconds = 0.0
     private let minimumSegmentSeconds = 1.2
-    private let maximumSegmentSeconds = 14.0
+    private let maximumSegmentSeconds = 30.0
     private let preRollSeconds = 0.30
     private let minimumSpeechSeconds = 0.25
     private let workDirectory: URL
+    private var pendingTranscriptions = 0
 
     private var minimumRMS: Float {
         source == .microphone ? 0.0045 : 0.0025
@@ -579,19 +611,33 @@ final class SenseVoicePipeline: AudioPipeline, @unchecked Sendable {
         source == .microphone ? 0.0065 : 0.0045
     }
 
-    private var endpointSilenceSeconds: Double {
-        source == .microphone ? 0.85 : 0.65
+    private var silenceTimeoutSeconds: Double {
+        if silenceTimeoutMs > 0 {
+            return min(max(Double(silenceTimeoutMs) / 1000.0, 0.4), 5.0)
+        }
+
+        return source == .microphone ? 0.85 : 0.65
     }
 
-    init(source: TranscriptSource, writer: JSONLineWriter, model: String, pythonPath: String, scriptPath: String) {
+    init(
+        source: TranscriptSource,
+        writer: JSONLineWriter,
+        model: String,
+        speakerCount: Int,
+        silenceTimeoutMs: Int,
+        pythonPath: String,
+        scriptPath: String
+    ) {
         self.source = source
         self.writer = writer
         self.model = model
+        self.speakerCount = min(max(speakerCount, 0), 8)
+        self.silenceTimeoutMs = min(max(silenceTimeoutMs, 400), 5_000)
         self.pythonPath = pythonPath
         self.scriptPath = scriptPath
         endpointGate = AudioEndpointGate(source: source, writer: writer)
         workDirectory = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("stiki-native-transcriber-sensevoice-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("stiki-native-transcriber-funasr-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: workDirectory, withIntermediateDirectories: true)
     }
 
@@ -599,17 +645,18 @@ final class SenseVoicePipeline: AudioPipeline, @unchecked Sendable {
         self.localeIdentifier = localeIdentifier
 
         guard FileManager.default.isExecutableFile(atPath: pythonPath) else {
-            throw NativeTranscriberError.missingSenseVoicePython(pythonPath)
+            throw NativeTranscriberError.missingFunASRPython(pythonPath)
         }
 
         guard FileManager.default.fileExists(atPath: scriptPath) else {
-            throw NativeTranscriberError.missingSenseVoiceWorker(scriptPath)
+            throw NativeTranscriberError.missingFunASRWorker(scriptPath)
         }
 
         try queue.sync {
             try startWorker()
         }
-        writer.emit(.debug("sensevoice backend started model=\(model) locale=\(localeIdentifier)", source: source))
+        writer.emit(.debug("funasr backend started model=\(model) locale=\(localeIdentifier)", source: source))
+        preloadModelInBackground()
     }
 
     func append(_ buffer: AVAudioPCMBuffer) {
@@ -630,28 +677,38 @@ final class SenseVoicePipeline: AudioPipeline, @unchecked Sendable {
     func stop() {
         queue.sync {
             stopped = true
+            acceptingTranscription = false
             finalizeCurrentSegment()
             clearPreRoll()
-            stopWorker()
         }
-        try? FileManager.default.removeItem(at: workDirectory)
+        stopWorker()
+        transcriptionQueue.async { [weak self] in
+            guard let self else {
+                return
+            }
+            cleanupPendingAudioFiles()
+            try? FileManager.default.removeItem(at: workDirectory)
+        }
     }
 
     private func startWorker() throws {
         let process = Process()
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
 
         process.executableURL = URL(fileURLWithPath: pythonPath)
         process.arguments = [scriptPath]
         process.standardInput = stdinPipe
         process.standardOutput = stdoutPipe
-        process.standardError = FileHandle.nullDevice
+        process.standardError = stderrPipe
 
         try process.run()
         self.process = process
         self.stdinPipe = stdinPipe
         self.stdoutPipe = stdoutPipe
+        self.stderrPipe = stderrPipe
+        observeWorkerStderr(stderrPipe)
     }
 
     private func stopWorker() {
@@ -664,6 +721,74 @@ final class SenseVoicePipeline: AudioPipeline, @unchecked Sendable {
         process = nil
         stdinPipe = nil
         stdoutPipe = nil
+        stderrPipe = nil
+    }
+
+    private func cleanupPendingAudioFiles() {
+        guard let entries = try? FileManager.default.contentsOfDirectory(at: workDirectory, includingPropertiesForKeys: nil) else {
+            return
+        }
+
+        for url in entries where url.pathExtension.lowercased() == "wav" {
+            try? FileManager.default.removeItem(at: url)
+        }
+        pendingTranscriptions = 0
+    }
+
+    private func preloadModelInBackground() {
+        transcriptionQueue.async { [weak self] in
+            guard let self, self.isAcceptingTranscription() else {
+                return
+            }
+
+            guard self.process?.isRunning == true else {
+                self.writer.emit(.error("FunASR worker is not running.", source: self.source))
+                return
+            }
+
+            self.writer.emit(.debug("funasr preload model request", source: self.source))
+            self.sendJSONLine(WorkerLoadRequest(type: "load", id: 0, model: self.model))
+
+            guard let responseData = self.readJSONLine(),
+                  let response = try? self.decoder.decode(WorkerResponse.self, from: responseData)
+            else {
+                if self.isAcceptingTranscription() {
+                    self.writer.emit(.error("FunASR worker did not return valid preload JSON.", source: self.source))
+                }
+                return
+            }
+
+            if response.type == "error" {
+                self.writer.emit(.debug("funasr preload failed: \(response.message ?? "unknown error")", source: self.source))
+                return
+            }
+
+            self.writer.emit(
+                .debug(
+                    "funasr preload complete durationMs=\(response.durationMs ?? 0)",
+                    source: self.source
+                )
+            )
+        }
+    }
+
+    private func isAcceptingTranscription() -> Bool {
+        queue.sync {
+            acceptingTranscription
+        }
+    }
+
+    private func observeWorkerStderr(_ pipe: Pipe) {
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let output = String(data: data, encoding: .utf8) else {
+                return
+            }
+
+            for line in output.split(whereSeparator: \.isNewline) {
+                self?.writer.emit(.debug("funasr worker: \(line)", source: self?.source ?? .microphone))
+            }
+        }
     }
 
     private func write(_ buffer: AVAudioPCMBuffer) {
@@ -699,19 +824,19 @@ final class SenseVoicePipeline: AudioPipeline, @unchecked Sendable {
             let duration = currentSampleRate > 0 ? Double(currentFrameCount) / currentSampleRate : 0
             let reachedEndpoint = duration >= minimumSegmentSeconds
                 && speechSeconds >= minimumSpeechSeconds
-                && trailingSilenceSeconds >= endpointSilenceSeconds
+                && trailingSilenceSeconds >= silenceTimeoutSeconds
             let reachedMaximum = duration >= maximumSegmentSeconds
             if reachedEndpoint || reachedMaximum {
                 writer.emit(
                     .debug(
-                        "sensevoice endpoint duration=\(String(format: "%.2f", duration)) speech=\(String(format: "%.2f", speechSeconds)) trailingSilence=\(String(format: "%.2f", trailingSilenceSeconds)) max=\(reachedMaximum)",
+                        "funasr endpoint duration=\(String(format: "%.2f", duration)) speech=\(String(format: "%.2f", speechSeconds)) trailingSilence=\(String(format: "%.2f", trailingSilenceSeconds)) max=\(reachedMaximum)",
                         source: source
                     )
                 )
                 finalizeCurrentSegment()
             }
         } catch {
-            writer.emit(.error("SenseVoice audio write failed: \(error.localizedDescription)", source: source))
+            writer.emit(.error("FunASR audio write failed: \(error.localizedDescription)", source: source))
         }
     }
 
@@ -757,20 +882,56 @@ final class SenseVoicePipeline: AudioPipeline, @unchecked Sendable {
             return
         }
 
+        let audioDurationMs = currentSampleRate > 0 ? Int(Double(currentFrameCount) / currentSampleRate * 1000) : 0
+
         currentFile = nil
         currentURL = nil
         currentFrameCount = 0
         trailingSilenceSeconds = 0
         speechSeconds = 0
 
-        transcribe(url)
+        enqueueTranscription(url, audioDurationMs: audioDurationMs)
     }
 
-    private func transcribe(_ url: URL) {
+    private func enqueueTranscription(_ url: URL, audioDurationMs: Int) {
+        guard acceptingTranscription else {
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
+
+        pendingTranscriptions += 1
+        writer.emit(
+            .debug(
+                "funasr queued segment=\(url.lastPathComponent) pendingTranscriptions=\(pendingTranscriptions)",
+                source: source
+            )
+        )
+        transcriptionQueue.async { [weak self] in
+            guard let self else {
+                try? FileManager.default.removeItem(at: url)
+                return
+            }
+
+            self.transcribe(url, audioDurationMs: audioDurationMs)
+            self.queue.async { [weak self] in
+                guard let self else {
+                    return
+                }
+                self.pendingTranscriptions = max(self.pendingTranscriptions - 1, 0)
+            }
+        }
+    }
+
+    private func transcribe(_ url: URL, audioDurationMs: Int) {
+        guard isAcceptingTranscription() else {
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
+
         let quality = AudioSegmentAnalyzer.quality(of: url, speechThreshold: minimumRMS * 1.6)
         writer.emit(
             .debug(
-                "sensevoice segment=\(url.lastPathComponent) rms=\(String(format: "%.5f", quality.rms)) speechRatio=\(String(format: "%.2f", quality.speechRatio)) duration=\(String(format: "%.2f", quality.duration))",
+                "funasr segment=\(url.lastPathComponent) rms=\(String(format: "%.5f", quality.rms)) speechRatio=\(String(format: "%.2f", quality.speechRatio)) duration=\(String(format: "%.2f", quality.duration))",
                 source: source
             )
         )
@@ -779,59 +940,119 @@ final class SenseVoicePipeline: AudioPipeline, @unchecked Sendable {
               quality.speechRatio >= minimumSpeechRatio,
               quality.speechDuration >= 0.30
         else {
-            writer.emit(.debug("sensevoice skipped low-speech segment", source: source))
+            writer.emit(.debug("funasr skipped low-speech segment", source: source))
             try? FileManager.default.removeItem(at: url)
             return
         }
 
         guard process?.isRunning == true else {
-            writer.emit(.error("SenseVoice worker is not running.", source: source))
+            writer.emit(.error("FunASR worker is not running.", source: source))
             try? FileManager.default.removeItem(at: url)
             return
         }
 
         requestIndex += 1
+        writer.emit(
+            .debug(
+                "funasr transcribe request id=\(requestIndex) file=\(url.lastPathComponent) audioDurationMs=\(audioDurationMs)",
+                source: source
+            )
+        )
         sendJSONLine(
             WorkerRequest(
                 type: "transcribe",
                 id: requestIndex,
                 path: url.path,
                 language: localeIdentifier,
-                model: model
+                model: model,
+                speakerCount: speakerCount
             )
         )
 
         guard let responseData = readJSONLine(),
               let response = try? decoder.decode(WorkerResponse.self, from: responseData)
         else {
-            writer.emit(.error("SenseVoice worker did not return valid JSON.", source: source))
+            writer.emit(.error("FunASR worker did not return valid JSON.", source: source))
             try? FileManager.default.removeItem(at: url)
             return
         }
+        writer.emit(.debug("funasr transcribe response id=\(response.id ?? requestIndex) type=\(response.type)", source: source))
 
         if response.type == "error" {
-            writer.emit(.error("SenseVoice worker failed: \(response.message ?? "unknown error")", source: source))
+            writer.emit(.debug("funasr worker skipped segment: \(response.message ?? "unknown error")", source: source))
         } else {
-            emitAcceptedResponse(response, url: url)
+            emitAcceptedResponse(response, url: url, audioDurationMs: audioDurationMs)
         }
 
         try? FileManager.default.removeItem(at: url)
     }
 
-    private func emitAcceptedResponse(_ response: WorkerResponse, url: URL) {
+    private func emitAcceptedResponse(_ response: WorkerResponse, url: URL, audioDurationMs: Int) {
         let text = response.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard response.isSpeech != false else {
-            writer.emit(.debug("sensevoice rejected non-speech tags raw=\(response.rawText ?? "")", source: source))
+            writer.emit(.debug("funasr rejected non-speech tags raw=\(response.rawText ?? "")", source: source))
             return
         }
 
         if let reason = TranscriptOutputFilter.shouldRejectText(text) {
-            writer.emit(.debug("sensevoice rejected segment: \(reason) text=\(text)", source: source))
+            writer.emit(.debug("funasr rejected segment: \(reason) text=\(text)", source: source))
             return
         }
 
-        writer.emit(.debug("sensevoice accepted segment=\(url.lastPathComponent) durationMs=\(response.durationMs ?? 0)", source: source))
-        writer.emit(.segment(text, isFinal: true, source: source))
+        let segments = normalizedWorkerSegments(response)
+        guard !segments.isEmpty else {
+            writer.emit(.debug("funasr rejected segment: no transcript segments", source: source))
+            return
+        }
+
+        writer.emit(
+            .debug(
+                "funasr accepted segment=\(url.lastPathComponent) transcriptSegments=\(segments.count) durationMs=\(response.durationMs ?? 0)",
+                source: source
+            )
+        )
+
+        let completedAt = nowMillis()
+        for segment in segments {
+            let segmentText = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let reason = TranscriptOutputFilter.shouldRejectText(segmentText) {
+                writer.emit(.debug("funasr rejected segment part: \(reason) text=\(segmentText)", source: source))
+                continue
+            }
+
+            writer.emit(
+                .segment(
+                    segmentText,
+                    isFinal: true,
+                    source: source,
+                    speaker: segment.speaker,
+                    createdAt: eventTime(completedAt: completedAt, audioDurationMs: audioDurationMs, segmentStartMs: segment.startMs)
+                )
+            )
+        }
+    }
+
+    private func normalizedWorkerSegments(_ response: WorkerResponse) -> [WorkerSegment] {
+        let segments = response.segments?.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? []
+        if !segments.isEmpty {
+            return segments
+        }
+
+        let text = response.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if text.isEmpty {
+            return []
+        }
+
+        return [WorkerSegment(text: text, speaker: nil, startMs: nil, endMs: nil)]
+    }
+
+    private func eventTime(completedAt: Int64, audioDurationMs: Int, segmentStartMs: Int?) -> Int64 {
+        guard audioDurationMs > 0 else {
+            return completedAt
+        }
+
+        let offsetMs = min(max(segmentStartMs ?? audioDurationMs, 0), audioDurationMs)
+        return completedAt - Int64(audioDurationMs - offsetMs)
     }
 
     private func sendJSONLine<T: Encodable>(_ value: T) {
@@ -1044,8 +1265,10 @@ final class NativeTranscriber: @unchecked Sendable {
     private let localeIdentifier: String
     private let backend: TranscriptBackend
     private let model: String
-    private let senseVoicePython: String
-    private let senseVoiceScript: String
+    private let speakerCount: Int
+    private let silenceTimeoutMs: Int
+    private let funASRPython: String
+    private let funASRScript: String
     private let writer = JSONLineWriter()
     private var pipeline: AudioPipeline?
     private var microphoneCapture: MicrophoneCapture?
@@ -1056,28 +1279,34 @@ final class NativeTranscriber: @unchecked Sendable {
         localeIdentifier: String,
         backend: TranscriptBackend,
         model: String,
-        senseVoicePython: String,
-        senseVoiceScript: String
+        speakerCount: Int,
+        silenceTimeoutMs: Int,
+        funASRPython: String,
+        funASRScript: String
     ) {
         self.source = source
         self.localeIdentifier = localeIdentifier
         self.backend = backend
         self.model = model
-        self.senseVoicePython = senseVoicePython
-        self.senseVoiceScript = senseVoiceScript
+        self.speakerCount = speakerCount
+        self.silenceTimeoutMs = silenceTimeoutMs
+        self.funASRPython = funASRPython
+        self.funASRScript = funASRScript
     }
 
     func start() async throws {
         let pipeline: AudioPipeline = switch backend {
         case .apple:
             SpeechRecognitionPipeline(source: source, writer: writer)
-        case .senseVoiceLocal:
-            SenseVoicePipeline(
+        case .funASRLocal:
+            FunASRPipeline(
                 source: source,
                 writer: writer,
                 model: model,
-                pythonPath: senseVoicePython,
-                scriptPath: senseVoiceScript
+                speakerCount: speakerCount,
+                silenceTimeoutMs: silenceTimeoutMs,
+                pythonPath: funASRPython,
+                scriptPath: funASRScript
             )
         }
 
@@ -1106,13 +1335,23 @@ final class NativeTranscriber: @unchecked Sendable {
     }
 }
 
-func parseArguments() -> (TranscriptSource, String, TranscriptBackend, String, String, String) {
+func parsePositiveInt(_ value: String, fallback: Int) -> Int {
+    guard let parsed = Int(value), parsed >= 0 else {
+        return fallback
+    }
+
+    return parsed
+}
+
+func parseArguments() -> (TranscriptSource, String, TranscriptBackend, String, Int, Int, String, String) {
     var source = TranscriptSource.system
     var locale = Locale.current.identifier.replacingOccurrences(of: "_", with: "-")
     var backend = TranscriptBackend.apple
     var model = ""
-    var senseVoicePython = ""
-    var senseVoiceScript = ""
+    var speakerCount = 2
+    var silenceTimeoutMs = 1200
+    var funASRPython = ""
+    var funASRScript = ""
     let arguments = CommandLine.arguments
     var index = 1
 
@@ -1132,11 +1371,17 @@ func parseArguments() -> (TranscriptSource, String, TranscriptBackend, String, S
         case "--model" where index + 1 < arguments.count:
             model = arguments[index + 1]
             index += 1
-        case "--sensevoice-python" where index + 1 < arguments.count:
-            senseVoicePython = arguments[index + 1]
+        case "--speaker-count" where index + 1 < arguments.count:
+            speakerCount = min(parsePositiveInt(arguments[index + 1], fallback: speakerCount), 8)
             index += 1
-        case "--sensevoice-script" where index + 1 < arguments.count:
-            senseVoiceScript = arguments[index + 1]
+        case "--silence-timeout-ms" where index + 1 < arguments.count:
+            silenceTimeoutMs = min(max(parsePositiveInt(arguments[index + 1], fallback: silenceTimeoutMs), 400), 5_000)
+            index += 1
+        case "--funasr-python" where index + 1 < arguments.count:
+            funASRPython = arguments[index + 1]
+            index += 1
+        case "--funasr-script" where index + 1 < arguments.count:
+            funASRScript = arguments[index + 1]
             index += 1
         default:
             break
@@ -1145,20 +1390,22 @@ func parseArguments() -> (TranscriptSource, String, TranscriptBackend, String, S
         index += 1
     }
 
-    return (source, locale, backend, model, senseVoicePython, senseVoiceScript)
+    return (source, locale, backend, model, speakerCount, silenceTimeoutMs, funASRPython, funASRScript)
 }
 
 @main
 struct Main {
     static func main() async {
-        let (source, locale, backend, model, senseVoicePython, senseVoiceScript) = parseArguments()
+        let (source, locale, backend, model, speakerCount, silenceTimeoutMs, funASRPython, funASRScript) = parseArguments()
         let transcriber = NativeTranscriber(
             source: source,
             localeIdentifier: locale,
             backend: backend,
             model: model,
-            senseVoicePython: senseVoicePython,
-            senseVoiceScript: senseVoiceScript
+            speakerCount: speakerCount,
+            silenceTimeoutMs: silenceTimeoutMs,
+            funASRPython: funASRPython,
+            funASRScript: funASRScript
         )
         let writer = JSONLineWriter()
 

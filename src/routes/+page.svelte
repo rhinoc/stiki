@@ -182,7 +182,7 @@ onMount(async () => {
         keys.includes("selectedSource") ||
         keys.includes("locale") ||
         keys.includes("backend") ||
-        keys.includes("senseVoiceModel") ||
+        keys.includes("funASRModelBundle") ||
         keys.includes("includeTimestamp") ||
         keys.includes("includeSpeaker")
       ) {

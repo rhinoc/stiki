@@ -27,7 +27,7 @@ fn build_native_transcriber() {
     println!("cargo:rerun-if-changed={}", package_path.join("Info.plist").display());
     println!(
         "cargo:rerun-if-changed={}",
-        package_path.join("scripts").join("sensevoice_worker.py").display()
+        package_path.join("scripts").join("funasr_worker.py").display()
     );
     println!(
         "cargo:rerun-if-changed={}",
@@ -87,11 +87,11 @@ fn build_native_transcriber() {
     if profile != "release" {
         println!("cargo:rustc-env=STIKI_NATIVE_TRANSCRIBER={}", bundled_helper_path.display());
         println!(
-            "cargo:rustc-env=STIKI_SENSEVOICE_SCRIPT={}",
-            package_path.join("scripts").join("sensevoice_worker.py").display()
+            "cargo:rustc-env=STIKI_FUNASR_SCRIPT={}",
+            package_path.join("scripts").join("funasr_worker.py").display()
         );
         println!(
-            "cargo:rustc-env=STIKI_SENSEVOICE_PYTHON={}",
+            "cargo:rustc-env=STIKI_FUNASR_PYTHON={}",
             package_path.join(".venv").join("bin").join("python").display()
         );
     }

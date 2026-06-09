@@ -6,14 +6,14 @@ import { BaseService } from "./base";
 type TranscriptStatus = "idle" | "starting" | "recording" | "stopping" | "unsupported";
 export type TranscriptSource = "microphone" | "system" | "both";
 type NativeTranscriptSource = Exclude<TranscriptSource, "both">;
-export type TranscriptBackend = "apple" | "sensevoice-local";
+export type TranscriptBackend = "apple" | "funasr-local";
 
 export const TRANSCRIPT_BACKEND_OPTIONS: Array<{ label: string; backend: TranscriptBackend }> = [
   { label: "Apple Speech", backend: "apple" },
-  { label: "SenseVoice", backend: "sensevoice-local" },
+  { label: "FunASR", backend: "funasr-local" },
 ];
 
-export interface SenseVoiceModelOption {
+export interface FunASRModelBundleOption {
   label: string;
   model: string;
   isLocal: boolean;
@@ -36,6 +36,27 @@ export const TRANSCRIPT_LANGUAGE_OPTIONS = [
 
 export type TranscriptLocale = (typeof TRANSCRIPT_LANGUAGE_OPTIONS)[number]["locale"];
 
+export const TRANSCRIPT_SPEAKER_COUNT_OPTIONS = [
+  { label: "Auto", speakerCount: 0 },
+  { label: "1", speakerCount: 1 },
+  { label: "2", speakerCount: 2 },
+  { label: "3", speakerCount: 3 },
+  { label: "4", speakerCount: 4 },
+  { label: "6", speakerCount: 6 },
+  { label: "8", speakerCount: 8 },
+] as const;
+
+export type TranscriptSpeakerCount = (typeof TRANSCRIPT_SPEAKER_COUNT_OPTIONS)[number]["speakerCount"];
+
+export const TRANSCRIPT_SILENCE_TIMEOUT_OPTIONS = [
+  { label: "Balanced (1.2s)", silenceTimeoutMs: 1200 },
+  { label: "Fast (0.8s)", silenceTimeoutMs: 800 },
+  { label: "Patient (1.8s)", silenceTimeoutMs: 1800 },
+  { label: "Long (2.5s)", silenceTimeoutMs: 2500 },
+] as const;
+
+export type TranscriptSilenceTimeoutMs = (typeof TRANSCRIPT_SILENCE_TIMEOUT_OPTIONS)[number]["silenceTimeoutMs"];
+
 export interface TranscriptSegment {
   text: string;
   createdAt: number;
@@ -51,8 +72,10 @@ interface TranscriptState {
   selectedSource: TranscriptSource;
   locale: TranscriptLocale;
   backend: TranscriptBackend;
-  senseVoiceModel: string;
-  senseVoiceModelOptions: SenseVoiceModelOption[];
+  funASRModelBundle: string;
+  funASRModelBundleOptions: FunASRModelBundleOption[];
+  speakerCount: TranscriptSpeakerCount;
+  silenceTimeoutMs: TranscriptSilenceTimeoutMs;
   includeTimestamp: boolean;
   includeSpeaker: boolean;
   lastText: string;
@@ -61,7 +84,14 @@ interface TranscriptState {
 
 export type TranscriptSettingsState = Pick<
   TranscriptState,
-  "selectedSource" | "locale" | "backend" | "senseVoiceModel" | "includeTimestamp" | "includeSpeaker"
+  | "selectedSource"
+  | "locale"
+  | "backend"
+  | "funASRModelBundle"
+  | "speakerCount"
+  | "silenceTimeoutMs"
+  | "includeTimestamp"
+  | "includeSpeaker"
 >;
 
 interface TranscriptEvents {
@@ -73,6 +103,7 @@ type NativeTranscriptEventType = "status" | "segment" | "error" | "debug";
 interface NativeTranscriptEvent {
   type: NativeTranscriptEventType;
   source?: NativeTranscriptSource;
+  speaker?: string;
   status?: "started" | "stopped";
   text?: string;
   isFinal?: boolean;
@@ -92,13 +123,17 @@ const getEffectiveTranscriptLocale = (locale: TranscriptLocale) => {
   return locale === "auto" ? navigator.language || "en-US" : locale;
 };
 
-const getTranscriptSpeaker = (source: NativeTranscriptSource) => {
+const getTranscriptSpeaker = (source: NativeTranscriptSource, speaker?: string) => {
+  if (speaker?.trim()) {
+    return speaker.trim();
+  }
+
   return source === "microphone" ? "Mic" : "System";
 };
 
-const getTranscriptBackendModel = (backend: TranscriptBackend, senseVoiceModel: string) => {
-  if (backend === "sensevoice-local") {
-    return senseVoiceModel;
+const getTranscriptBackendModel = (backend: TranscriptBackend, funASRModelBundle: string) => {
+  if (backend === "funasr-local") {
+    return funASRModelBundle;
   }
 
   return "";
@@ -113,8 +148,10 @@ export class TranscriptService extends BaseService<TranscriptState, TranscriptEv
     selectedSource: "both",
     locale: getDefaultTranscriptLocale(),
     backend: "apple",
-    senseVoiceModel: "",
-    senseVoiceModelOptions: [],
+    funASRModelBundle: "",
+    funASRModelBundleOptions: [],
+    speakerCount: 2,
+    silenceTimeoutMs: 1200,
     includeTimestamp: true,
     includeSpeaker: true,
     lastText: "",
@@ -143,8 +180,16 @@ export class TranscriptService extends BaseService<TranscriptState, TranscriptEv
     this.setState("backend", backend);
   }
 
-  setSenseVoiceModel(model: string) {
-    this.setState("senseVoiceModel", model);
+  setFunASRModelBundle(model: string) {
+    this.setState("funASRModelBundle", model);
+  }
+
+  setSpeakerCount(speakerCount: TranscriptSpeakerCount) {
+    this.setState("speakerCount", speakerCount);
+  }
+
+  setSilenceTimeoutMs(silenceTimeoutMs: TranscriptSilenceTimeoutMs) {
+    this.setState("silenceTimeoutMs", silenceTimeoutMs);
   }
 
   setSelectedSource(source: TranscriptSource) {
@@ -174,8 +219,20 @@ export class TranscriptService extends BaseService<TranscriptState, TranscriptEv
     if (settings.backend && TRANSCRIPT_BACKEND_OPTIONS.some((option) => option.backend === settings.backend)) {
       nextState.backend = settings.backend;
     }
-    if (typeof settings.senseVoiceModel === "string" && settings.senseVoiceModel.trim()) {
-      nextState.senseVoiceModel = settings.senseVoiceModel;
+    if (typeof settings.funASRModelBundle === "string" && settings.funASRModelBundle.trim()) {
+      nextState.funASRModelBundle = settings.funASRModelBundle;
+    }
+    if (
+      typeof settings.speakerCount === "number" &&
+      TRANSCRIPT_SPEAKER_COUNT_OPTIONS.some((option) => option.speakerCount === settings.speakerCount)
+    ) {
+      nextState.speakerCount = settings.speakerCount;
+    }
+    if (
+      typeof settings.silenceTimeoutMs === "number" &&
+      TRANSCRIPT_SILENCE_TIMEOUT_OPTIONS.some((option) => option.silenceTimeoutMs === settings.silenceTimeoutMs)
+    ) {
+      nextState.silenceTimeoutMs = settings.silenceTimeoutMs;
     }
     if (typeof settings.includeTimestamp === "boolean") {
       nextState.includeTimestamp = settings.includeTimestamp;
@@ -192,35 +249,37 @@ export class TranscriptService extends BaseService<TranscriptState, TranscriptEv
       selectedSource: this._state.selectedSource,
       locale: this._state.locale,
       backend: this._state.backend,
-      senseVoiceModel: this._state.senseVoiceModel,
+      funASRModelBundle: this._state.funASRModelBundle,
+      speakerCount: this._state.speakerCount,
+      silenceTimeoutMs: this._state.silenceTimeoutMs,
       includeTimestamp: this._state.includeTimestamp,
       includeSpeaker: this._state.includeSpeaker,
     };
   }
 
-  async refreshSenseVoiceModels() {
-    const options = await invoke<SenseVoiceModelOption[]>(TauriCommand.ListSenseVoiceModels);
-    const hasSelectedModel = options.some((option) => option.model === this._state.senseVoiceModel);
+  async refreshFunASRModelBundles() {
+    const options = await invoke<FunASRModelBundleOption[]>(TauriCommand.ListFunASRModelBundles);
+    const hasSelectedModel = options.some((option) => option.model === this._state.funASRModelBundle);
     if (!hasSelectedModel) {
-      this.setState("senseVoiceModel", options[0]?.model ?? "");
+      this.setState("funASRModelBundle", options[0]?.model ?? "");
     }
-    this.setState("senseVoiceModelOptions", options);
+    this.setState("funASRModelBundleOptions", options);
   }
 
-  async openSenseVoiceModelsDirectory() {
-    await invoke<string>(TauriCommand.OpenSenseVoiceModelsDir);
-    await this.refreshSenseVoiceModels();
+  async openFunASRModelsDirectory() {
+    await invoke<string>(TauriCommand.OpenFunASRModelsDir);
+    await this.refreshFunASRModelBundles();
   }
 
   async start(source: TranscriptSource = this._state.selectedSource) {
     if (this.isRecording) {
       return;
     }
-    if (this._state.backend === "sensevoice-local" && !this._state.senseVoiceModel) {
-      await this.refreshSenseVoiceModels();
+    if (this._state.backend === "funasr-local" && !this._state.funASRModelBundle) {
+      await this.refreshFunASRModelBundles();
     }
-    if (this._state.backend === "sensevoice-local" && !this._state.senseVoiceModel) {
-      throw new Error("Add a SenseVoice model folder or symlink before starting transcript with SenseVoice.");
+    if (this._state.backend === "funasr-local" && !this._state.funASRModelBundle) {
+      throw new Error("Add a complete FunASR model bundle before starting transcript with FunASR.");
     }
 
     this.setStates({
@@ -241,7 +300,9 @@ export class TranscriptService extends BaseService<TranscriptState, TranscriptEv
         source,
         locale: getEffectiveTranscriptLocale(this._state.locale),
         backend: this._state.backend,
-        model: getTranscriptBackendModel(this._state.backend, this._state.senseVoiceModel),
+        model: getTranscriptBackendModel(this._state.backend, this._state.funASRModelBundle),
+        speakerCount: this._state.speakerCount,
+        silenceTimeoutMs: this._state.silenceTimeoutMs,
       });
 
       this.setStates({
@@ -347,13 +408,13 @@ export class TranscriptService extends BaseService<TranscriptState, TranscriptEv
     this.setState("lastText", text);
     if (event.isFinal) {
       this._clearPartialCommitTimers(source);
-      this._commitTranscriptText(text, event.createdAt ?? Date.now(), source);
+      this._commitTranscriptText(text, event.createdAt ?? Date.now(), source, event.speaker);
       return;
     }
 
     this._clearPartialCommitTimers(source);
     this._partialCommitTimers[source] = window.setTimeout(() => {
-      this._commitTranscriptText(text, event.createdAt ?? Date.now(), source);
+      this._commitTranscriptText(text, event.createdAt ?? Date.now(), source, event.speaker);
     }, PARTIAL_COMMIT_WAIT);
   }
 
@@ -396,7 +457,7 @@ export class TranscriptService extends BaseService<TranscriptState, TranscriptEv
     }
   }
 
-  private _commitTranscriptText(text: string, createdAt: number, source: NativeTranscriptSource) {
+  private _commitTranscriptText(text: string, createdAt: number, source: NativeTranscriptSource, speaker?: string) {
     const nextText = this._getNewTranscriptText(source, text);
     if (!nextText) {
       return;
@@ -409,10 +470,10 @@ export class TranscriptService extends BaseService<TranscriptState, TranscriptEv
     this._lastCommittedText[source] = text;
     this._rememberCommittedSegment(nextText, createdAt, source);
     this._emitter.emit("segment", {
-      text: this._formatTranscriptSegment(nextText, createdAt, source),
+      text: this._formatTranscriptSegment(nextText, createdAt, source, speaker),
       createdAt,
       source,
-      speaker: getTranscriptSpeaker(source),
+      speaker: getTranscriptSpeaker(source, speaker),
     });
   }
 
@@ -437,7 +498,7 @@ export class TranscriptService extends BaseService<TranscriptState, TranscriptEv
     return text;
   }
 
-  private _formatTranscriptSegment(text: string, createdAt: number, source: NativeTranscriptSource) {
+  private _formatTranscriptSegment(text: string, createdAt: number, source: NativeTranscriptSource, speaker?: string) {
     const parts: string[] = [];
     if (this._state.includeTimestamp) {
       const time = new Date(createdAt).toLocaleTimeString([], {
@@ -449,7 +510,7 @@ export class TranscriptService extends BaseService<TranscriptState, TranscriptEv
       parts.push(`[${time}]`);
     }
     if (this._state.includeSpeaker) {
-      parts.push(`${getTranscriptSpeaker(source)}:`);
+      parts.push(`${getTranscriptSpeaker(source, speaker)}:`);
     }
 
     return parts.length ? `${parts.join(" ")} ${text}` : text;
