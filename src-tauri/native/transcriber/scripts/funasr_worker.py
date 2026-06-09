@@ -241,6 +241,17 @@ def normalize_speaker_count(value):
     return min(max(count, 0), SPEAKER_MAX_PROFILES)
 
 
+def vad_merge_length_seconds(speaker_count):
+    count = normalize_speaker_count(speaker_count)
+    if count <= 0:
+        return 6
+    if count <= 2:
+        return 8
+    if count <= 4:
+        return 6
+    return 5
+
+
 def audio_duration_ms(audio_path):
     try:
         import soundfile as sf
@@ -451,9 +462,15 @@ def transcribe(request):
     audio_path = request["path"]
     language = normalize_language(request.get("language", "auto"))
     speaker_count = normalize_speaker_count(request.get("speakerCount"))
+    merge_length_s = vad_merge_length_seconds(speaker_count)
 
     model = load_model(model_name)
     started_at = time.perf_counter()
+    print(
+        f"funasr transcribe config speakerCount={speaker_count or 'auto'} mergeLengthS={merge_length_s}",
+        file=sys.stderr,
+        flush=True,
+    )
     with contextlib.redirect_stdout(sys.stderr):
         result = model.generate(
             input=audio_path,
@@ -469,7 +486,7 @@ def transcribe(request):
             no_speech_threshold=0.6,
             batch_size_s=60,
             merge_vad=True,
-            merge_length_s=15,
+            merge_length_s=merge_length_s,
             disable_pbar=True,
         )
 
@@ -491,6 +508,7 @@ def transcribe(request):
         "tags": tags,
         "isSpeech": is_speech,
         "durationMs": duration_ms,
+        "mergeLengthS": merge_length_s,
     }
 
 
