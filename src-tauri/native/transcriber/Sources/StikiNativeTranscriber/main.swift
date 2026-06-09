@@ -124,6 +124,7 @@ enum NativeTranscriberError: Error, LocalizedError {
     case invalidSampleBuffer
     case missingFunASRPython(String)
     case missingFunASRWorker(String)
+    case funASRPreloadFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -145,6 +146,8 @@ enum NativeTranscriberError: Error, LocalizedError {
             "FunASR Python was not found at \(path)."
         case .missingFunASRWorker(let path):
             "FunASR worker script was not found at \(path)."
+        case .funASRPreloadFailed(let message):
+            "FunASR preload failed: \(message)"
         }
     }
 }
@@ -592,6 +595,7 @@ final class FunASRPipeline: AudioPipeline, @unchecked Sendable {
     private var stderrPipe: Pipe?
     private var stopped = false
     private var acceptingTranscription = true
+    private var modelPreloaded = false
     private var preRollBuffers: [AVAudioPCMBuffer] = []
     private var preRollFrameCount: AVAudioFramePosition = 0
     private var trailingSilenceSeconds = 0.0
@@ -660,7 +664,7 @@ final class FunASRPipeline: AudioPipeline, @unchecked Sendable {
             try startWorker()
         }
         writer.emit(.debug("funasr backend started model=\(model) locale=\(localeIdentifier)", source: source))
-        preloadModelInBackground()
+        try preloadModel()
     }
 
     func append(_ buffer: AVAudioPCMBuffer) {
@@ -739,38 +743,34 @@ final class FunASRPipeline: AudioPipeline, @unchecked Sendable {
         pendingTranscriptions = 0
     }
 
-    private func preloadModelInBackground() {
-        transcriptionQueue.async { [weak self] in
-            guard let self, self.isAcceptingTranscription() else {
+    private func preloadModel() throws {
+        try transcriptionQueue.sync {
+            guard isAcceptingTranscription(), !modelPreloaded else {
                 return
             }
 
-            guard self.process?.isRunning == true else {
-                self.writer.emit(.error("FunASR worker is not running.", source: self.source))
-                return
+            guard process?.isRunning == true else {
+                throw NativeTranscriberError.funASRPreloadFailed("worker is not running")
             }
 
-            self.writer.emit(.debug("funasr preload model request", source: self.source))
-            self.sendJSONLine(WorkerLoadRequest(type: "load", id: 0, model: self.model))
+            writer.emit(.debug("funasr preload model request", source: source))
+            sendJSONLine(WorkerLoadRequest(type: "load", id: 0, model: model))
 
-            guard let responseData = self.readJSONLine(),
-                  let response = try? self.decoder.decode(WorkerResponse.self, from: responseData)
+            guard let responseData = readJSONLine(),
+                  let response = try? decoder.decode(WorkerResponse.self, from: responseData)
             else {
-                if self.isAcceptingTranscription() {
-                    self.writer.emit(.error("FunASR worker did not return valid preload JSON.", source: self.source))
-                }
-                return
+                throw NativeTranscriberError.funASRPreloadFailed("worker did not return valid preload JSON")
             }
 
             if response.type == "error" {
-                self.writer.emit(.debug("funasr preload failed: \(response.message ?? "unknown error")", source: self.source))
-                return
+                throw NativeTranscriberError.funASRPreloadFailed(response.message ?? "unknown error")
             }
 
-            self.writer.emit(
+            modelPreloaded = true
+            writer.emit(
                 .debug(
                     "funasr preload complete durationMs=\(response.durationMs ?? 0)",
-                    source: self.source
+                    source: source
                 )
             )
         }

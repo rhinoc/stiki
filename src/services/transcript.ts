@@ -339,7 +339,6 @@ export class TranscriptService extends BaseService<TranscriptState, TranscriptEv
       });
 
       this.setStates({
-        status: "recording",
         hasMicrophoneAudio: source === "microphone" || source === "both",
         hasSystemAudio: source === "system" || source === "both",
         source,
