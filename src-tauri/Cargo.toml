@@ -1,6 +1,6 @@
 [package]
 name = "stiki"
-version = "0.1.14"
+version = "0.1.15"
 description = "Just another sticker app"
 authors = ["rhinoc"]
 edition = "2021"
