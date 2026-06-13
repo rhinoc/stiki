@@ -1,3 +1,4 @@
+mod slash;
 mod transcript;
 
 use tauri::Manager;
@@ -226,6 +227,8 @@ pub fn run() {
             hide_dock_icon,
             read_markdown_file,
             write_markdown_file,
+            slash::start_shell_task,
+            slash::take_screenshot,
             transcript::list_funasr_model_bundles,
             transcript::open_funasr_models_dir,
             transcript::preload_funasr_model,

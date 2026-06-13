@@ -5,6 +5,8 @@ export enum TauriCommand {
   HideDockIcon = "hide_dock_icon",
   ReadMarkdownFile = "read_markdown_file",
   WriteMarkdownFile = "write_markdown_file",
+  StartShellTask = "start_shell_task",
+  TakeScreenshot = "take_screenshot",
   ListFunASRModelBundles = "list_funasr_model_bundles",
   OpenFunASRModelsDir = "open_funasr_models_dir",
   PreloadFunASRModel = "preload_funasr_model",

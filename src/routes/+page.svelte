@@ -25,6 +25,7 @@ import { TauriCommand } from "../constants/tauri-command";
 import { EditorService } from "../services/editor";
 import { MarkdownFileService } from "../services/markdown-file";
 import { SaveService, StateKey } from "../services/save";
+import { SlashCommandService } from "../services/slash-command";
 import { TabService } from "../services/tab";
 import { ThemeService } from "../services/theme";
 import { TranscriptService, type TranscriptSegment } from "../services/transcript";
@@ -67,6 +68,11 @@ const tabService = new TabService();
 const transcriptService = new TranscriptService();
 disposeFns.push(() => {
   transcriptService.dispose();
+});
+
+const slashCommandService = new SlashCommandService(editorService);
+disposeFns.push(() => {
+  slashCommandService.dispose();
 });
 // #endregion service
 
@@ -135,6 +141,7 @@ onMount(async () => {
   void transcriptService.prepareFunASRModel().catch((error) => {
     Logger.warn(`Failed to preload FunASR model: ${error instanceof Error ? error.message : String(error)}`);
   });
+  await slashCommandService.init();
   // #endregion restore from store
 
   // #region set initial state
